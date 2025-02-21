@@ -143,6 +143,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
     username: "",
     password: "",
     aliasNotes: "",
+    type: "Premium", // Neues Feld für den Typ
     validUntil: new Date(new Date().getFullYear(), 11, 31),
     owner: loggedInUser,
     extensionHistory: [],
@@ -210,6 +211,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       username: "",
       password: "",
       aliasNotes: "",
+      type: "Premium", // Standardmäßig auf "Premium" setzen
       validUntil: new Date(new Date().getFullYear(), 11, 31),
       owner: loggedInUser,
       extensionHistory: [],
@@ -263,6 +265,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       username: manualEntry.username,
       password: manualEntry.password,
       aliasNotes: manualEntry.aliasNotes,
+      type: manualEntry.type, // Typ (Premium/Basic) hinzufügen
       validUntil: validUntilDate,
       owner: loggedInUser,
       status: "Aktiv",
@@ -887,6 +890,18 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
               setManualEntry({ ...manualEntry, bougetList: e.target.value })
             }
           />
+          {/* Dropdown für den Typ */}
+          <Select
+            fullWidth
+            margin="normal"
+            value={manualEntry.type}
+            onChange={(e) =>
+              setManualEntry({ ...manualEntry, type: e.target.value })
+            }
+          >
+            <MenuItem value="Premium">Premium</MenuItem>
+            <MenuItem value="Basic">Basic</MenuItem>
+          </Select>
           <TextField
             label="Gültig bis"
             fullWidth
