@@ -35,8 +35,8 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
 // Benutzer-Emojis
 const userEmojis = {
   Admin: "👑",
-  Test: "🚀",
-  Test1: "🎩",
+  Scholli: "🚀",
+  Jamaica05: "🎩",
 };
 
 // Erstellen des Themes
@@ -122,7 +122,12 @@ const App = () => {
 
   // Login-Logik
   const handleLogin = (username, password) => {
-    const users = { Admin: "Admin", Test: "Test", Test1: "Test1" };
+    const users = {
+      Admin: "Admino25!",
+      Scholli: "Scholli25",
+      Jamaica05: "Werwer55",
+    };
+
     if (users[username] === password) {
       setLoggedInUser(username);
       setRole(username === "Admin" ? "Admin" : "Friend");
@@ -191,13 +196,13 @@ const App = () => {
             {loggedInUser && (
               <Typography
                 variant="h6"
-                style={{ marginLeft: "auto", marginRight: "20px" }}
+                sx={{ marginLeft: "auto", marginRight: 2, fontSize: { xs: "14px", sm: "16px" } }}
               >
                 {userEmojis[loggedInUser]} {loggedInUser}
               </Typography>
             )}
             {loggedInUser && (
-              <Button onClick={handleLogout} color="inherit">
+              <Button onClick={handleLogout} color="inherit" sx={{ fontSize: { xs: "12px", sm: "14px" } }}>
                 🔓 Logout
               </Button>
             )}
@@ -240,16 +245,16 @@ const App = () => {
                     sx={{ marginBottom: 2 }}
                   >
                     <MenuItem value="Admin">Admin</MenuItem>
-                    <MenuItem value="Test">Test</MenuItem>
-                    <MenuItem value="Test1">Test1</MenuItem>
+                    <MenuItem value="Scholli">Scholli</MenuItem>
+                    <MenuItem value="Jamaica05">Jamaica05</MenuItem>
                   </Select>
                 )}
 
                 {/* Scrollbarer Bereich für den Chatverlauf */}
                 <Box
                   sx={{
-                    maxHeight: "300px", // Maximale Höhe des Chatverlaufs
-                    overflowY: "auto", // Scrollen aktivieren
+                    maxHeight: { xs: "200px", sm: "300px" }, // Höhe für mobile und Desktop
+                    overflowY: "auto",
                     marginBottom: 2,
                   }}
                 >
@@ -265,7 +270,14 @@ const App = () => {
                 </Box>
 
                 {/* Eingabefeld für neue Nachrichten */}
-                <Box sx={{ display: "flex", gap: 1, alignItems: "center" }}>
+                <Box
+                  sx={{
+                    display: "flex",
+                    flexDirection: { xs: "column", sm: "row" }, // Vertikal auf mobil, horizontal auf Desktop
+                    gap: 1,
+                    alignItems: "center",
+                  }}
+                >
                   <TextField
                     label="Neue Nachricht"
                     variant="outlined"
@@ -274,7 +286,7 @@ const App = () => {
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyPress={(e) => {
                       if (e.key === "Enter") {
-                        sendMessage(); // Nachricht mit Enter senden
+                        sendMessage();
                       }
                     }}
                   />
@@ -282,6 +294,7 @@ const App = () => {
                     variant="contained"
                     color="primary"
                     onClick={sendMessage}
+                    sx={{ width: { xs: "100%", sm: "auto" } }} // Volle Breite auf mobil
                   >
                     Senden
                   </Button>
