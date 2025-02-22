@@ -40,9 +40,9 @@ const generateUsername = (owner) => {
   const randomNum = Math.floor(100 + Math.random() * 900); // Zufällige Zahl zwischen 100 und 900
 
   // Benutzername basierend auf dem Ersteller generieren
-  if (owner === "Test") {
+  if (owner === "Scholli") {
     return `${randomNum}-telucod-5`;
-  } else if (owner === "Test1") {
+  } else if (owner === "Jamaica05") {
     return `${randomNum}-pricod-4`;
   } else if (owner === "Admin") {
     return `${randomNum}-adlucod-0`;
