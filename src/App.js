@@ -11,6 +11,7 @@ import {
   Select,
   MenuItem,
   TextField,
+  Alert,
 } from "@mui/material";
 import { styled, ThemeProvider, createTheme } from "@mui/material/styles";
 import { supabase } from "./supabaseClient";
@@ -58,6 +59,15 @@ const theme = createTheme({
   },
 });
 
+// Wiederverwendbare Snackbar-Komponente
+const CustomSnackbar = ({ open, message, onClose, severity = "success" }) => (
+  <Snackbar open={open} autoHideDuration={4000} onClose={onClose}>
+    <Alert onClose={onClose} severity={severity} sx={{ width: "100%" }}>
+      {message}
+    </Alert>
+  </Snackbar>
+);
+
 const App = () => {
   // Zustand für Benutzer & Rollen
   const [loggedInUser, setLoggedInUser] = useState(
@@ -72,6 +82,14 @@ const App = () => {
   // Zustand für Snackbar
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarSeverity, setSnackbarSeverity] = useState("success");
+
+  // Funktion zum Anzeigen von Snackbar-Nachrichten
+  const showSnackbar = (message, severity = "success") => {
+    setSnackbarMessage(message);
+    setSnackbarSeverity(severity);
+    setSnackbarOpen(true);
+  };
 
   // Nachrichten von Supabase abrufen
   const fetchMessages = async () => {
@@ -85,12 +103,12 @@ const App = () => {
         .order("created_at", { ascending: true });
 
       if (error) {
-        console.error("Fehler beim Abrufen der Nachrichten:", error);
-      } else {
-        setMessages(data);
+        throw new Error("Fehler beim Abrufen der Nachrichten: " + error.message);
       }
+      setMessages(data);
     } catch (error) {
-      console.error("Fehler beim Abrufen der Nachrichten:", error);
+      console.error(error);
+      showSnackbar(error.message, "error");
     }
   };
 
@@ -137,12 +155,10 @@ const App = () => {
       localStorage.setItem("role", username === "Admin" ? "Admin" : "Friend");
 
       // Snackbar anzeigen
-      setSnackbarMessage(`✅ Willkommen, ${username}!`);
-      setSnackbarOpen(true);
+      showSnackbar(`✅ Willkommen, ${username}!`);
     } else {
       // Snackbar für falsches Passwort anzeigen
-      setSnackbarMessage("❌ Ungültige Zugangsdaten");
-      setSnackbarOpen(true);
+      showSnackbar("❌ Ungültige Zugangsdaten", "error");
     }
   };
 
@@ -156,13 +172,15 @@ const App = () => {
     localStorage.removeItem("role");
 
     // Snackbar anzeigen
-    setSnackbarMessage("🔓 Erfolgreich abgemeldet!");
-    setSnackbarOpen(true);
+    showSnackbar("🔓 Erfolgreich abgemeldet!");
   };
 
   // Funktion zum Senden einer Nachricht
   const sendMessage = async () => {
-    if (!newMessage.trim()) return; // Leere Nachrichten ignorieren
+    if (!newMessage.trim()) {
+      showSnackbar("❌ Nachricht darf nicht leer sein", "error");
+      return;
+    }
 
     try {
       const { error } = await supabase.from("messages").insert([
@@ -174,16 +192,12 @@ const App = () => {
       ]);
 
       if (error) {
-        console.error("Fehler beim Senden der Nachricht:", error);
-        setSnackbarMessage("Fehler beim Senden der Nachricht.");
-        setSnackbarOpen(true);
-      } else {
-        setNewMessage(""); // Eingabefeld leeren
+        throw new Error("Fehler beim Senden der Nachricht: " + error.message);
       }
+      setNewMessage(""); // Eingabefeld leeren
     } catch (error) {
-      console.error("Fehler beim Senden der Nachricht:", error);
-      setSnackbarMessage("Fehler beim Senden der Nachricht.");
-      setSnackbarOpen(true);
+      console.error(error);
+      showSnackbar(error.message, "error");
     }
   };
 
@@ -311,12 +325,12 @@ const App = () => {
             </>
           )}
         </Suspense>
-        {/* Snackbar für Login-Feedback */}
-        <Snackbar
+        {/* Snackbar für Feedback */}
+        <CustomSnackbar
           open={snackbarOpen}
-          autoHideDuration={4000}
-          onClose={() => setSnackbarOpen(false)}
           message={snackbarMessage}
+          onClose={() => setSnackbarOpen(false)}
+          severity={snackbarSeverity}
         />
       </StyledContainer>
     </ThemeProvider>
