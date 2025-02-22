@@ -19,6 +19,8 @@ import {
   Alert,
   AppBar,
   Toolbar,
+  BottomNavigation,
+  BottomNavigationAction,
 } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AddIcon from "@mui/icons-material/Add";
@@ -137,17 +139,17 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
     validUntil: new Date(new Date().getFullYear(), 11, 31),
     owner: loggedInUser,
     extensionHistory: [],
-    bougetList: "", // Neues Feld für die Bouget-Liste
+    bougetList: "",
   });
   const [manualEntry, setManualEntry] = useState({
     username: "",
     password: "",
     aliasNotes: "",
-    type: "Premium", // Neues Feld für den Typ
+    type: "Premium",
     validUntil: new Date(new Date().getFullYear(), 11, 31),
     owner: loggedInUser,
     extensionHistory: [],
-    bougetList: "", // Neues Feld für die Bouget-Liste
+    bougetList: "",
   });
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
@@ -186,8 +188,8 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
   }, []);
 
   const handleOpenCreateEntryDialog = () => {
-    const username = generateUsername(loggedInUser); // Benutzername basierend auf dem Ersteller generieren
-    const randomPassword = Math.random().toString(36).slice(-8); // Zufälliges Passwort generieren
+    const username = generateUsername(loggedInUser);
+    const randomPassword = Math.random().toString(36).slice(-8);
 
     setNewEntry({
       username: username,
@@ -200,7 +202,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       validUntil: new Date(new Date().getFullYear(), 11, 31),
       owner: loggedInUser,
       extensionHistory: [],
-      bougetList: "", // Neues Feld für die Bouget-Liste
+      bougetList: "",
     });
 
     setOpenCreateEntryDialog(true);
@@ -211,11 +213,11 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       username: "",
       password: "",
       aliasNotes: "",
-      type: "Premium", // Standardmäßig auf "Premium" setzen
+      type: "Premium",
       validUntil: new Date(new Date().getFullYear(), 11, 31),
       owner: loggedInUser,
       extensionHistory: [],
-      bougetList: "", // Neues Feld für die Bouget-Liste
+      bougetList: "",
     });
     setOpenManualEntryDialog(true);
   };
@@ -265,7 +267,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       username: manualEntry.username,
       password: manualEntry.password,
       aliasNotes: manualEntry.aliasNotes,
-      type: manualEntry.type, // Typ (Premium/Basic) hinzufügen
+      type: manualEntry.type,
       validUntil: validUntilDate,
       owner: loggedInUser,
       status: "Aktiv",
@@ -273,7 +275,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       createdAt: new Date(),
       note: "Dieser Abonnent besteht bereits",
       extensionHistory: [],
-      bougetList: manualEntry.bougetList, // Neues Feld für die Bouget-Liste
+      bougetList: manualEntry.bougetList,
     };
 
     try {
@@ -553,45 +555,34 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       </AppBar>
       <Box
         sx={{
-          marginBottom: 3,
-          marginTop: 3,
+          padding: 2,
           display: "flex",
-          justifyContent: "space-between",
+          flexDirection: { xs: "column", sm: "row" },
+          gap: 2,
+          marginBottom: 3,
         }}
       >
-        <Box>
-          <Button
-            onClick={handleOpenCreateEntryDialog}
-            variant="contained"
-            color="success"
-            startIcon={<AddIcon />}
-          >
-            Abonnent anlegen
-          </Button>
-          <Button
-            onClick={handleOpenManualEntryDialog}
-            variant="contained"
-            color="primary"
-            startIcon={<EditIcon />}
-          >
-            Bestehenden Abonnenten einpflegen
-          </Button>
-        </Box>
-        <Box sx={{ textAlign: "right" }}>
-          <Typography variant="h6">
-            🎉 Du hast {countEntriesByOwner(loggedInUser)} Einträge erstellt!
-          </Typography>
-          {entryCount >= 5 && (
-            <Fade in={true} timeout={1000}>
-              <Typography variant="body2" color="success.main">
-                {motivationMessage}
-              </Typography>
-            </Fade>
-          )}
-        </Box>
+        <Button
+          onClick={handleOpenCreateEntryDialog}
+          variant="contained"
+          color="success"
+          startIcon={<AddIcon />}
+          fullWidth
+        >
+          Abonnent anlegen
+        </Button>
+        <Button
+          onClick={handleOpenManualEntryDialog}
+          variant="contained"
+          color="primary"
+          startIcon={<EditIcon />}
+          fullWidth
+        >
+          Bestehenden Abonnenten einpflegen
+        </Button>
       </Box>
       {role === "Admin" && (
-        <Box sx={{ marginBottom: 3 }}>
+        <Box sx={{ marginBottom: 3, padding: 2 }}>
           <Typography variant="h6">Ersteller filtern:</Typography>
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
             {uniqueOwners.map((owner, index) => (
@@ -600,11 +591,12 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
                 variant="outlined"
                 onClick={() => setSelectedUser(owner)}
                 color={selectedUser === owner ? "primary" : "default"}
+                sx={{ flex: "1 1 auto" }}
               >
                 {owner} ({countEntriesByOwner(owner)})
               </Button>
             ))}
-            <Button variant="outlined" onClick={() => setSelectedUser("")}>
+            <Button variant="outlined" onClick={() => setSelectedUser("")} fullWidth>
               Alle anzeigen
             </Button>
           </Box>
@@ -616,152 +608,153 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
         fullWidth
         value={searchTerm}
         onChange={(e) => setSearchTerm(e.target.value)}
-        sx={{ marginBottom: 3 }}
+        sx={{ marginBottom: 3, padding: 2 }}
       />
-      <Divider style={{ margin: "20px 0" }} />
-      {loading ? (
-        <Typography>🚀 Lade Einträge...</Typography>
-      ) : filterEntries.length > 0 ? (
-        filterEntries.map((entry, index) => (
-          <Accordion key={index} sx={{ marginBottom: 2 }}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography>
-                <strong>Erstellt von:</strong> {entry.owner} <br />
-                <strong> Benutzername:</strong> {entry.username} |{" "}
-                <strong> Passwort:</strong> {entry.password} |{" "}
-                <strong> Spitzname:</strong> {entry.aliasNotes}
-                {entry.note && (
-                  <span style={{ color: "red" }}> ({entry.note})</span>
-                )}
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography style={{ color: "black" }}>
-                <strong>Typ:</strong> {entry.type}
-              </Typography>
-              <Typography style={{ color: "black" }}>
-                <strong>Bouget-Liste:</strong> {entry.bougetList}
-              </Typography>
-              <Typography style={{ color: getStatusColor(entry.status) }}>
-                <strong>Status:</strong> {entry.status}
-              </Typography>
-              <Typography
-                style={{ color: getPaymentStatusColor(entry.paymentStatus) }}
-              >
-                <strong>Zahlung:</strong> {entry.paymentStatus}
-              </Typography>
-              <Typography style={{ color: "black" }}>
-                <strong>Erstellt am:</strong> {formatDate(entry.createdAt)}
-              </Typography>
-              <Typography style={{ color: "black" }}>
-                <strong>Gültig bis:</strong> {formatDate(entry.validUntil)}
-                {entry.extensionRequest && entry.extensionRequest.pending && (
-                  <span style={{ color: "orange" }}>
-                    {" "}
-                    (Anfrage beim Admin gestellt)
-                  </span>
-                )}
-                {entry.extensionRequest && entry.extensionRequest.approved && (
-                  <span style={{ color: "green" }}>
-                    {" "}
-                    (Verlängerung genehmigt)
-                  </span>
-                )}
-              </Typography>
-              <Button
-                onClick={async () => {
-                  await requestExtension(entry.id);
-                }}
-                variant="contained"
-                color="primary"
-                sx={{ marginTop: 2 }}
-              >
-                +1 Jahr verlängern
-              </Button>
-              {role === "Admin" && (
-                <Box sx={{ marginTop: 2 }}>
-                  <Button
-                    onClick={() =>
-                      changeStatus(
-                        entry.id,
-                        entry.status === "Aktiv" ? "Inaktiv" : "Aktiv"
-                      )
-                    }
-                    variant="contained"
-                    color="secondary"
-                    sx={{ marginRight: 1 }}
-                  >
-                    {entry.status === "Aktiv" ? "Setze Inaktiv" : "Setze Aktiv"}
-                  </Button>
-                  <Button
-                    onClick={() =>
-                      changePaymentStatus(
-                        entry.id,
-                        entry.paymentStatus === "Gezahlt"
-                          ? "Nicht gezahlt"
-                          : "Gezahlt"
-                      )
-                    }
-                    variant="contained"
-                    color="secondary"
-                    sx={{ marginRight: 1 }}
-                  >
-                    {entry.paymentStatus === "Gezahlt"
-                      ? "Setze Nicht gezahlt"
-                      : "Setze Gezahlt"}
-                  </Button>
-                  <Button
-                    onClick={() => deleteEntry(entry.id)}
-                    variant="contained"
-                    color="error"
-                    startIcon={<DeleteIcon />}
-                  >
-                    Löschen
-                  </Button>
-                  <Button
-                    onClick={() => approveExtension(entry.id)}
-                    variant="contained"
-                    color="success"
-                    sx={{ marginLeft: 1 }}
-                  >
-                    Verlängerung genehmigen
-                  </Button>
-                </Box>
-              )}
-              {role === "Admin" && (
-                <Box sx={{ marginTop: 2 }}>
-                  <Typography variant="body2">
-                    <strong>Verlängerungshistorie:</strong>
-                  </Typography>
-                  {entry.extensionHistory &&
-                  entry.extensionHistory.length > 0 ? (
-                    entry.extensionHistory.map((extension, idx) => {
-                      const approvalDate = extension.approvalDate
-                        ? formatDate(extension.approvalDate)
-                        : "NaN.NaN.NaN";
-                      const validUntil = extension.validUntil
-                        ? formatDate(extension.validUntil)
-                        : "NaN.NaN.NaN";
-                      return (
-                        <Typography key={idx} variant="body2">
-                          Verlängerung genehmigt am: {approvalDate} | Gültig
-                          bis: {validUntil}
-                        </Typography>
-                      );
-                    })
-                  ) : (
-                    <Typography variant="body2">
-                      Keine Verlängerungen vorhanden.
-                    </Typography>
+      <Box sx={{ maxHeight: "60vh", overflowY: "auto", padding: 2 }}>
+        {loading ? (
+          <Typography>🚀 Lade Einträge...</Typography>
+        ) : filterEntries.length > 0 ? (
+          filterEntries.map((entry, index) => (
+            <Accordion key={index} sx={{ marginBottom: 2 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Typography>
+                  <strong>Erstellt von:</strong> {entry.owner} <br />
+                  <strong> Benutzername:</strong> {entry.username} |{" "}
+                  <strong> Passwort:</strong> {entry.password} |{" "}
+                  <strong> Spitzname:</strong> {entry.aliasNotes}
+                  {entry.note && (
+                    <span style={{ color: "red" }}> ({entry.note})</span>
                   )}
-                </Box>
-              )}
-            </AccordionDetails>
-          </Accordion>
-        ))
-      ) : (
-        <Typography>🚀 Keine passenden Einträge gefunden.</Typography>
-      )}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails>
+                <Typography style={{ color: "black" }}>
+                  <strong>Typ:</strong> {entry.type}
+                </Typography>
+                <Typography style={{ color: "black" }}>
+                  <strong>Bouget-Liste:</strong> {entry.bougetList}
+                </Typography>
+                <Typography style={{ color: getStatusColor(entry.status) }}>
+                  <strong>Status:</strong> {entry.status}
+                </Typography>
+                <Typography
+                  style={{ color: getPaymentStatusColor(entry.paymentStatus) }}
+                >
+                  <strong>Zahlung:</strong> {entry.paymentStatus}
+                </Typography>
+                <Typography style={{ color: "black" }}>
+                  <strong>Erstellt am:</strong> {formatDate(entry.createdAt)}
+                </Typography>
+                <Typography style={{ color: "black" }}>
+                  <strong>Gültig bis:</strong> {formatDate(entry.validUntil)}
+                  {entry.extensionRequest && entry.extensionRequest.pending && (
+                    <span style={{ color: "orange" }}>
+                      {" "}
+                      (Anfrage beim Admin gestellt)
+                    </span>
+                  )}
+                  {entry.extensionRequest && entry.extensionRequest.approved && (
+                    <span style={{ color: "green" }}>
+                      {" "}
+                      (Verlängerung genehmigt)
+                    </span>
+                  )}
+                </Typography>
+                <Button
+                  onClick={async () => {
+                    await requestExtension(entry.id);
+                  }}
+                  variant="contained"
+                  color="primary"
+                  sx={{ marginTop: 2 }}
+                >
+                  +1 Jahr verlängern
+                </Button>
+                {role === "Admin" && (
+                  <Box sx={{ marginTop: 2 }}>
+                    <Button
+                      onClick={() =>
+                        changeStatus(
+                          entry.id,
+                          entry.status === "Aktiv" ? "Inaktiv" : "Aktiv"
+                        )
+                      }
+                      variant="contained"
+                      color="secondary"
+                      sx={{ marginRight: 1 }}
+                    >
+                      {entry.status === "Aktiv" ? "Setze Inaktiv" : "Setze Aktiv"}
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        changePaymentStatus(
+                          entry.id,
+                          entry.paymentStatus === "Gezahlt"
+                            ? "Nicht gezahlt"
+                            : "Gezahlt"
+                        )
+                      }
+                      variant="contained"
+                      color="secondary"
+                      sx={{ marginRight: 1 }}
+                    >
+                      {entry.paymentStatus === "Gezahlt"
+                        ? "Setze Nicht gezahlt"
+                        : "Setze Gezahlt"}
+                    </Button>
+                    <Button
+                      onClick={() => deleteEntry(entry.id)}
+                      variant="contained"
+                      color="error"
+                      startIcon={<DeleteIcon />}
+                    >
+                      Löschen
+                    </Button>
+                    <Button
+                      onClick={() => approveExtension(entry.id)}
+                      variant="contained"
+                      color="success"
+                      sx={{ marginLeft: 1 }}
+                    >
+                      Verlängerung genehmigen
+                    </Button>
+                  </Box>
+                )}
+                {role === "Admin" && (
+                  <Box sx={{ marginTop: 2 }}>
+                    <Typography variant="body2">
+                      <strong>Verlängerungshistorie:</strong>
+                    </Typography>
+                    {entry.extensionHistory &&
+                    entry.extensionHistory.length > 0 ? (
+                      entry.extensionHistory.map((extension, idx) => {
+                        const approvalDate = extension.approvalDate
+                          ? formatDate(extension.approvalDate)
+                          : "NaN.NaN.NaN";
+                        const validUntil = extension.validUntil
+                          ? formatDate(extension.validUntil)
+                          : "NaN.NaN.NaN";
+                        return (
+                          <Typography key={idx} variant="body2">
+                            Verlängerung genehmigt am: {approvalDate} | Gültig
+                            bis: {validUntil}
+                          </Typography>
+                        );
+                      })
+                    ) : (
+                      <Typography variant="body2">
+                        Keine Verlängerungen vorhanden.
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          ))
+        ) : (
+          <Typography>🚀 Keine passenden Einträge gefunden.</Typography>
+        )}
+      </Box>
       <Snackbar
         open={snackbarOpen}
         autoHideDuration={6000}
@@ -778,6 +771,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       <Dialog
         open={openCreateEntryDialog}
         onClose={() => setOpenCreateEntryDialog(false)}
+        fullScreen
       >
         <DialogTitle>Neuen Abonnenten anlegen</DialogTitle>
         <DialogContent>
@@ -850,6 +844,7 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       <Dialog
         open={openManualEntryDialog}
         onClose={() => setOpenManualEntryDialog(false)}
+        fullScreen
       >
         <DialogTitle>Bestehenden Abonnenten einpflegen</DialogTitle>
         <DialogContent>
@@ -890,7 +885,6 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
               setManualEntry({ ...manualEntry, bougetList: e.target.value })
             }
           />
-          {/* Dropdown für den Typ */}
           <Select
             fullWidth
             margin="normal"
@@ -937,6 +931,13 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
           </Button>
         </DialogActions>
       </Dialog>
+      <BottomNavigation
+        sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
+      >
+        <BottomNavigationAction label="Neu" icon={<AddIcon />} onClick={handleOpenCreateEntryDialog} />
+        <BottomNavigationAction label="Bearbeiten" icon={<EditIcon />} onClick={handleOpenManualEntryDialog} />
+        <BottomNavigationAction label="Backup" icon={<BackupIcon />} onClick={exportEntries} />
+      </BottomNavigation>
     </div>
   );
 };
