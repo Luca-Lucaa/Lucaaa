@@ -1,12 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   Typography,
   TextField,
   Button,
-  Divider,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -14,120 +10,34 @@ import {
   Box,
   Select,
   MenuItem,
-  Fade,
-  Snackbar,
-  Alert,
-  AppBar,
-  Toolbar,
-  BottomNavigation,
-  BottomNavigationAction,
+  Card,
+  CardContent,
+  Grid,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AddIcon from "@mui/icons-material/Add";
-import EditIcon from "@mui/icons-material/Edit";
-import DeleteIcon from "@mui/icons-material/Delete";
-import BackupIcon from "@mui/icons-material/Backup";
 import { supabase } from "./supabaseClient";
+import { formatDate, generateUsername, useDebounce, handleError } from "./utils";
+import { useSnackbar } from "./useSnackbar";
+import { OWNER_COLORS } from "./config";
+import EntryAccordion from "./EntryAccordion";
 
-// Helper functions
-const formatDate = (date) => {
-  if (!date || isNaN(new Date(date).getTime())) return "NaN.NaN.NaN";
-  const d = new Date(date);
-  return `${d.getDate().toString().padStart(2, "0")}.${(d.getMonth() + 1)
-    .toString()
-    .padStart(2, "0")}.${d.getFullYear()}`;
-};
-
-const generateUsername = (owner) => {
-  const randomNum = Math.floor(100 + Math.random() * 900); // Zufällige Zahl zwischen 100 und 900
-
-  // Benutzername basierend auf dem Ersteller generieren
-  if (owner === "Scholli") {
-    return `${randomNum}-telucod-5`;
-  } else if (owner === "Jamaica05") {
-    return `${randomNum}-pricod-4`;
-  } else if (owner === "Admin") {
-    return `${randomNum}-adlucod-0`;
-  } else {
-    // Fallback für unbekannte Ersteller
-    return `${randomNum}-siksuk`;
-  }
-};
-
-const useDebounce = (value, delay) => {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-  return debouncedValue;
-};
-
-const ImportBackup = ({ setSnackbarOpen, setSnackbarMessage }) => {
-  const [file, setFile] = useState(null);
-
-  const handleFileChange = (event) => {
-    setFile(event.target.files[0]);
-  };
-
-  const importBackup = async () => {
-    if (!file) {
-      setSnackbarMessage("Bitte wählen Sie eine Datei aus.");
-      setSnackbarOpen(true);
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const jsonData = JSON.parse(e.target.result);
-        for (const entry of jsonData) {
-          const { error } = await supabase
-            .from("entries")
-            .insert([entry])
-            .select();
-
-          if (error) {
-            console.error("Fehler beim Importieren des Eintrags:", error);
-          }
-        }
-        setSnackbarMessage("Backup erfolgreich importiert!");
-        setSnackbarOpen(true);
-      } catch (error) {
-        console.error("Fehler beim Importieren des Backups: ", error);
-        setSnackbarMessage("Fehler beim Importieren des Backups.");
-        setSnackbarOpen(true);
-      }
-    };
-
-    reader.readAsText(file);
-  };
-
-  return (
-    <Box sx={{ display: "flex", alignItems: "center" }}>
-      <input type="file" accept=".json" onChange={handleFileChange} />
-      <Button
-        variant="contained"
-        color="primary"
-        onClick={importBackup}
-        sx={{ marginLeft: 2 }}
-      >
-        Backup importieren
-      </Button>
-    </Box>
-  );
-};
-
-const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
-  const [openCreateEntryDialog, setOpenCreateEntryDialog] = useState(false);
-  const [openManualEntryDialog, setOpenManualEntryDialog] = useState(false);
+const EntryList = ({
+  role,
+  loggedInUser,
+  entries,
+  setEntries,
+  openCreateDialog,
+  setOpenCreateDialog,
+  openManualDialog,
+  setOpenManualDialog,
+}) => {
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-  const [selectedUser, setSelectedUser] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [paymentFilter, setPaymentFilter] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [newEntry, setNewEntry] = useState({
     username: "",
     password: "",
@@ -140,6 +50,8 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
     owner: loggedInUser,
     extensionHistory: [],
     bougetList: "",
+    admin_fee: null,
+    extensionRequest: null,
   });
   const [manualEntry, setManualEntry] = useState({
     username: "",
@@ -150,49 +62,98 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
     owner: loggedInUser,
     extensionHistory: [],
     bougetList: "",
+    admin_fee: null,
+    extensionRequest: null,
   });
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const debouncedSearch = useDebounce(searchTerm, 300);
 
-  useEffect(() => {
-    setDebouncedSearchTerm(debouncedSearch);
-  }, [debouncedSearch]);
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  const { showSnackbar } = useSnackbar();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const fetchEntries = async () => {
-    setLoading(true);
-    try {
-      const { data: entriesData, error } = await supabase
-        .from("entries")
-        .select("*");
+  const owners = useMemo(() => {
+    const uniqueOwners = [...new Set(entries.map((entry) => entry.owner))];
+    return uniqueOwners.sort();
+  }, [entries]);
 
-      if (error) {
-        console.error("Fehler beim Abrufen der Einträge:", error);
-        setSnackbarMessage("Fehler beim Abrufen der Einträge.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries(entriesData);
-      }
-    } catch (error) {
-      console.error("Fehler beim Abrufen der Einträge: ", error);
-      setSnackbarMessage("Fehler beim Abrufen der Einträge.");
-      setSnackbarOpen(true);
-    } finally {
-      setLoading(false);
+  const filteredEntries = useMemo(() => {
+    let filtered = entries;
+    if (role !== "Admin") {
+      filtered = entries.filter((entry) => entry.owner === loggedInUser);
+    } else if (ownerFilter) {
+      filtered = filtered.filter((entry) => entry.owner === ownerFilter);
     }
-  };
+    if (debouncedSearchTerm) {
+      filtered = filtered.filter(
+        (entry) =>
+          entry.username.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+          entry.aliasNotes.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+      );
+    }
+    if (statusFilter) {
+      filtered = filtered.filter((entry) => entry.status === statusFilter);
+    }
+    if (paymentFilter) {
+      filtered = filtered.filter((entry) => entry.paymentStatus === paymentFilter);
+    }
+    return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }, [
+    entries,
+    role,
+    loggedInUser,
+    debouncedSearchTerm,
+    statusFilter,
+    paymentFilter,
+    ownerFilter,
+  ]);
 
-  useEffect(() => {
-    fetchEntries();
-  }, []);
+  const calculateTotalFeesForOwner = useCallback(
+    (owner) => {
+      const ownerEntries = entries.filter((entry) => entry.owner === owner);
+      return ownerEntries.reduce((total, entry) => total + (entry.admin_fee || 0), 0);
+    },
+    [entries]
+  );
 
-  const handleOpenCreateEntryDialog = () => {
+  const countEntriesByOwner = useCallback(
+    (owner) => {
+      return entries.filter((entry) => entry.owner === owner).length;
+    },
+    [entries]
+  );
+
+  const entryCount = countEntriesByOwner(loggedInUser);
+
+  const milestones = [5, 10, 15, 20, 25, 50, 100];
+  const nextMilestone = milestones.find((milestone) => milestone > entryCount) || 100;
+  const progressToNext = nextMilestone - entryCount;
+
+  const motivationalPhrases = [
+    "Super Arbeit!",
+    "Fantastisch gemacht!",
+    "Du rockst das!",
+    "Unglaublich gut!",
+    "Weiter so, Champion!",
+    "Beeindruckend!",
+    "Toll drauf!",
+  ];
+
+  const motivationMessage = useMemo(() => {
+    const randomPhrase = motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)];
+    if (entryCount === 0) {
+      return "🎉 Du hast noch keine Einträge erstellt. Lass uns mit dem ersten beginnen!";
+    } else if (entryCount >= 100) {
+      return `🎉 ${randomPhrase} Du hast ${entryCount} Einträge erreicht! Du bist ein wahrer Meister!`;
+    } else {
+      return `🎉 ${randomPhrase} Du hast ${entryCount} Einträge erreicht! Nur noch ${progressToNext} bis ${nextMilestone}!`;
+    }
+  }, [entryCount]);
+
+  const handleOpenCreateEntryDialog = useCallback(() => {
     const username = generateUsername(loggedInUser);
     const randomPassword = Math.random().toString(36).slice(-8);
-
     setNewEntry({
-      username: username,
+      username,
       password: randomPassword,
       aliasNotes: "",
       type: "Premium",
@@ -203,12 +164,13 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       owner: loggedInUser,
       extensionHistory: [],
       bougetList: "",
+      admin_fee: null,
+      extensionRequest: null,
     });
+    setOpenCreateDialog(true);
+  }, [loggedInUser, setOpenCreateDialog]);
 
-    setOpenCreateEntryDialog(true);
-  };
-
-  const handleOpenManualEntryDialog = () => {
+  const handleOpenManualEntryDialog = useCallback(() => {
     setManualEntry({
       username: "",
       password: "",
@@ -218,50 +180,37 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       owner: loggedInUser,
       extensionHistory: [],
       bougetList: "",
+      admin_fee: null,
+      extensionRequest: null,
     });
-    setOpenManualEntryDialog(true);
-  };
+    setOpenManualDialog(true);
+  }, [loggedInUser, setOpenManualDialog]);
 
-  const createEntry = async () => {
-    if (!newEntry.aliasNotes.trim() || !newEntry.username.trim()) {
-      setSnackbarMessage("Bitte Spitzname und Benutzername eingeben.");
-      setSnackbarOpen(true);
+  const createEntry = useCallback(async () => {
+    if (!newEntry.aliasNotes.trim()) {
+      showSnackbar("Bitte Spitzname eingeben.", "error");
       return;
     }
+    setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("entries")
-        .insert([newEntry])
-        .select();
-
-      if (error) {
-        console.error("Fehler beim Hinzufügen des Eintrags:", error);
-        setSnackbarMessage("Fehler beim Hinzufügen des Eintrags.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) => [data[0], ...prevEntries]);
-        setOpenCreateEntryDialog(false);
-        setSnackbarMessage("Neuer Abonnent erfolgreich angelegt!");
-        setSnackbarOpen(true);
-      }
+      const { data, error } = await supabase.from("entries").insert([newEntry]).select();
+      if (error) throw error;
+      setEntries((prev) => [data[0], ...prev]);
+      setOpenCreateDialog(false);
+      showSnackbar("Neuer Abonnent erfolgreich angelegt!");
     } catch (error) {
-      console.error("Fehler beim Hinzufügen des Eintrags: ", error);
-      setSnackbarMessage("Fehler beim Hinzufügen des Eintrags.");
-      setSnackbarOpen(true);
+      handleError(error, showSnackbar);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [newEntry, setEntries, showSnackbar, setOpenCreateDialog]);
 
-  const handleAddManualEntry = async () => {
-    if (
-      !manualEntry.username ||
-      !manualEntry.password ||
-      !manualEntry.aliasNotes
-    ) {
-      setSnackbarMessage("Bitte füllen Sie alle Felder aus.");
-      setSnackbarOpen(true);
+  const handleAddManualEntry = useCallback(async () => {
+    if (!manualEntry.username || !manualEntry.password || !manualEntry.aliasNotes) {
+      showSnackbar("Bitte füllen Sie alle Felder aus.", "error");
       return;
     }
-
+    setIsLoading(true);
     const validUntilDate = new Date(manualEntry.validUntil);
     const newManualEntry = {
       username: manualEntry.username,
@@ -276,622 +225,335 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
       note: "Dieser Abonnent besteht bereits",
       extensionHistory: [],
       bougetList: manualEntry.bougetList,
+      admin_fee: role === "Admin" ? manualEntry.admin_fee : null,
+      extensionRequest: null,
     };
-
     try {
-      const { data, error } = await supabase
-        .from("entries")
-        .insert([newManualEntry])
-        .select();
-
-      if (error) {
-        console.error("Fehler beim Hinzufügen des manuellen Eintrags:", error);
-        setSnackbarMessage("Fehler beim Hinzufügen des manuellen Eintrags.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) => [data[0], ...prevEntries]);
-        setOpenManualEntryDialog(false);
-        setSnackbarMessage("Bestehender Abonnent erfolgreich eingepflegt!");
-        setSnackbarOpen(true);
-      }
+      const { data, error } = await supabase.from("entries").insert([newManualEntry]).select();
+      if (error) throw error;
+      setEntries((prev) => [data[0], ...prev]);
+      setOpenManualDialog(false);
+      showSnackbar("Bestehender Abonnent erfolgreich eingepflegt!");
     } catch (error) {
-      console.error("Fehler beim Hinzufügen des manuellen Eintrags: ", error);
-      setSnackbarMessage("Fehler beim Hinzufügen des manuellen Eintrags.");
-      setSnackbarOpen(true);
+      handleError(error, showSnackbar);
+    } finally {
+      setIsLoading(false);
     }
-  };
-
-  const changePaymentStatus = async (entryId, paymentStatus) => {
-    try {
-      const { error } = await supabase
-        .from("entries")
-        .update({ paymentStatus })
-        .eq("id", entryId);
-
-      if (error) {
-        console.error("Fehler beim Aktualisieren des Zahlungsstatus:", error);
-        setSnackbarMessage("Fehler beim Aktualisieren des Zahlungsstatus.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) =>
-          prevEntries.map((entry) =>
-            entry.id === entryId ? { ...entry, paymentStatus } : entry
-          )
-        );
-      }
-    } catch (error) {
-      console.error("Fehler beim Aktualisieren des Zahlungsstatus: ", error);
-      setSnackbarMessage("Fehler beim Aktualisieren des Zahlungsstatus.");
-      setSnackbarOpen(true);
-    }
-  };
-
-  const changeStatus = async (entryId, newStatus) => {
-    try {
-      const { error } = await supabase
-        .from("entries")
-        .update({ status: newStatus })
-        .eq("id", entryId);
-
-      if (error) {
-        console.error("Fehler beim Ändern des Status:", error);
-        setSnackbarMessage("Fehler beim Ändern des Status.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) =>
-          prevEntries.map((entry) =>
-            entry.id === entryId ? { ...entry, status: newStatus } : entry
-          )
-        );
-        setSnackbarMessage(`Status erfolgreich auf "${newStatus}" geändert.`);
-        setSnackbarOpen(true);
-      }
-    } catch (error) {
-      console.error("Fehler beim Ändern des Status: ", error);
-      setSnackbarMessage("Fehler beim Ändern des Status.");
-      setSnackbarOpen(true);
-    }
-  };
-
-  const deleteEntry = async (entryId) => {
-    try {
-      const { error } = await supabase
-        .from("entries")
-        .delete()
-        .eq("id", entryId);
-
-      if (error) {
-        console.error("Fehler beim Löschen des Eintrags:", error);
-        setSnackbarMessage("Fehler beim Löschen des Eintrags.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) =>
-          prevEntries.filter((entry) => entry.id !== entryId)
-        );
-      }
-    } catch (error) {
-      console.error("Fehler beim Löschen des Eintrags: ", error);
-      setSnackbarMessage("Fehler beim Löschen des Eintrags.");
-      setSnackbarOpen(true);
-    }
-  };
-
-  const requestExtension = async (entryId) => {
-    try {
-      const { error } = await supabase
-        .from("entries")
-        .update({ extensionRequest: { pending: true, approved: false } })
-        .eq("id", entryId);
-
-      if (error) {
-        console.error("Fehler beim Senden der Verlängerungsanfrage:", error);
-        setSnackbarMessage("Fehler beim Senden der Anfrage.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) =>
-          prevEntries.map((entry) =>
-            entry.id === entryId
-              ? {
-                  ...entry,
-                  extensionRequest: { pending: true, approved: false },
-                }
-              : entry
-          )
-        );
-        setSnackbarMessage("Anfrage zur Verlängerung gesendet.");
-        setSnackbarOpen(true);
-      }
-    } catch (error) {
-      console.error("Fehler beim Senden der Verlängerungsanfrage: ", error);
-      setSnackbarMessage("Fehler beim Senden der Anfrage.");
-      setSnackbarOpen(true);
-    }
-  };
-
-  const approveExtension = async (entryId) => {
-    const entry = entries.find((entry) => entry.id === entryId);
-    const newValidUntil = new Date(entry.validUntil);
-    newValidUntil.setFullYear(newValidUntil.getFullYear() + 1);
-
-    const updatedEntry = {
-      validUntil: newValidUntil,
-      extensionRequest: {
-        pending: false,
-        approved: true,
-        approvalDate: new Date(),
-      },
-      extensionHistory: [
-        ...(entry.extensionHistory || []),
-        {
-          approvalDate: new Date(),
-          validUntil: newValidUntil,
-        },
-      ],
-    };
-
-    try {
-      const { error } = await supabase
-        .from("entries")
-        .update(updatedEntry)
-        .eq("id", entryId);
-
-      if (error) {
-        console.error("Fehler beim Genehmigen der Verlängerung:", error);
-        setSnackbarMessage("Fehler beim Genehmigen der Verlängerung.");
-        setSnackbarOpen(true);
-      } else {
-        setEntries((prevEntries) =>
-          prevEntries.map((entry) =>
-            entry.id === entryId ? { ...entry, ...updatedEntry } : entry
-          )
-        );
-        setSnackbarMessage("Verlängerung genehmigt.");
-        setSnackbarOpen(true);
-      }
-    } catch (error) {
-      console.error("Fehler beim Genehmigen der Verlängerung: ", error);
-      setSnackbarMessage("Fehler beim Genehmigen der Verlängerung.");
-      setSnackbarOpen(true);
-    }
-  };
-
-  const getStatusColor = (status) => {
-    return status === "Aktiv"
-      ? "green"
-      : status === "Inaktiv"
-      ? "red"
-      : "black";
-  };
-
-  const getPaymentStatusColor = (paymentStatus) => {
-    return paymentStatus === "Gezahlt"
-      ? "green"
-      : paymentStatus === "Nicht gezahlt"
-      ? "red"
-      : "black";
-  };
-
-  const filterEntries = useMemo(() => {
-    return entries
-      .filter((entry) =>
-        role === "Admin"
-          ? selectedUser
-            ? entry.owner === selectedUser
-            : true
-          : entry.owner === loggedInUser
-      )
-      .filter(
-        (entry) =>
-          (entry.username && entry.username.includes(debouncedSearchTerm)) ||
-          (entry.aliasNotes && entry.aliasNotes.includes(debouncedSearchTerm))
-      );
-  }, [entries, role, selectedUser, loggedInUser, debouncedSearchTerm]);
-
-  const uniqueOwners = [...new Set(entries.map((entry) => entry.owner))];
-  const countEntriesByOwner = (owner) => {
-    return entries.filter((entry) => entry.owner === owner).length;
-  };
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
-  };
-
-  const exportEntries = () => {
-    const dataStr = JSON.stringify(entries, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "backup_entries.json";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const entryCount = countEntriesByOwner(loggedInUser);
-  let motivationMessage = "";
-  if (entryCount >= 10 && entryCount < 15) {
-    motivationMessage =
-      "🎉 Super! Du hast bereits 10 Einträge erreicht! Mach weiter so, du bist auf dem besten Weg zu 15!";
-  } else if (entryCount >= 15 && entryCount < 20) {
-    motivationMessage =
-      "🎉 Fantastisch! 15 Einträge sind erreicht! Nur noch 5 bis zu 20! Lass uns das schaffen!";
-  } else if (entryCount >= 20 && entryCount < 25) {
-    motivationMessage =
-      "🎉 Großartig! Du hast 20 Einträge! Nur noch 5 bis zu 25! Weiter so!";
-  } else if (entryCount >= 25) {
-    motivationMessage =
-      "🎉 Wow! Du hast 25 Einträge erreicht! Deine Kreativität kennt keine Grenzen! Mach weiter so!";
-  } else if (entryCount > 0) {
-    motivationMessage = `🎉 Du hast ${entryCount} Einträge erstellt! Weiter so, der nächste Meilenstein ist 5!`;
-  } else {
-    motivationMessage =
-      "🎉 Du hast noch keine Einträge erstellt. Lass uns mit dem ersten Eintrag beginnen!";
-  }
+  }, [manualEntry, loggedInUser, role, setEntries, showSnackbar, setOpenManualDialog]);
 
   return (
-    <div>
-      <AppBar position="static">
-        <Toolbar>
-          {role === "Admin" && (
-            <>
-              <ImportBackup
-                setSnackbarOpen={setSnackbarOpen}
-                setSnackbarMessage={setSnackbarMessage}
-              />
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<BackupIcon />}
-                onClick={exportEntries}
-                sx={{ marginLeft: 2 }}
-              >
-                Backup erstellen
-              </Button>
-            </>
-          )}
-        </Toolbar>
-      </AppBar>
+    <Box sx={{ p: isMobile ? 1 : 3, bgcolor: "#f5f5f5", borderRadius: 2 }}>
+      <Typography
+        variant="h5"
+        gutterBottom
+        sx={{
+          fontWeight: "bold",
+          color: "#1976d2",
+          fontSize: isMobile ? "1.2rem" : "1.5rem",
+        }}
+      >
+        Abonnenten
+      </Typography>
+      {role !== "Admin" && (
+        <Card sx={{ mb: 3, p: isMobile ? 1 : 2, bgcolor: "#e3f2fd", boxShadow: 3, borderRadius: 2 }}>
+          <CardContent>
+            <Typography variant="body1" sx={{ fontSize: isMobile ? "0.9rem" : "1.1rem" }}>
+              {motivationMessage}
+            </Typography>
+            <Typography variant="body2" sx={{ mt: 1, color: "#555", fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
+              Gesamtgebühren: {calculateTotalFeesForOwner(loggedInUser).toLocaleString()} €
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
       <Box
         sx={{
-          padding: 2,
+          mb: 3,
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 2,
-          marginBottom: 3,
+          flexDirection: isMobile ? "column" : "row",
+          gap: isMobile ? 1 : 2,
+        }}
+      >
+        <TextField
+          label="🔍 Suche nach Benutzername oder Spitzname"
+          variant="outlined"
+          fullWidth
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          sx={{ bgcolor: "#fff", borderRadius: 1 }}
+          size={isMobile ? "small" : "medium"}
+        />
+        <Select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          displayEmpty
+          fullWidth
+          sx={{ bgcolor: "#fff", borderRadius: 1 }}
+          size={isMobile ? "small" : "medium"}
+        >
+          <MenuItem value="">Alle Status</MenuItem>
+          <MenuItem value="Aktiv">Aktiv</MenuItem>
+          <MenuItem value="Inaktiv">Inaktiv</MenuItem>
+        </Select>
+        <Select
+          value={paymentFilter}
+          onChange={(e) => setPaymentFilter(e.target.value)}
+          displayEmpty
+          fullWidth
+          sx={{ bgcolor: "#fff", borderRadius: 1 }}
+          size={isMobile ? "small" : "medium"}
+        >
+          <MenuItem value="">Alle Zahlungen</MenuItem>
+          <MenuItem value="Gezahlt">Gezahlt</MenuItem>
+          <MenuItem value="Nicht gezahlt">Nicht gezahlt</MenuItem>
+        </Select>
+        {role === "Admin" && (
+          <Select
+            value={ownerFilter}
+            onChange={(e) => setOwnerFilter(e.target.value)}
+            displayEmpty
+            fullWidth
+            sx={{ bgcolor: "#fff", borderRadius: 1 }}
+            size={isMobile ? "small" : "medium"}
+          >
+            <MenuItem value="">Alle Ersteller</MenuItem>
+            {owners.map((owner) => (
+              <MenuItem key={owner} value={owner}>
+                {owner}
+              </MenuItem>
+            ))}
+          </Select>
+        )}
+      </Box>
+      <Box
+        sx={{
+          mb: 3,
+          display: "flex",
+          gap: isMobile ? 1 : 2,
+          flexWrap: "wrap",
+          flexDirection: isMobile ? "column" : "row",
         }}
       >
         <Button
-          onClick={handleOpenCreateEntryDialog}
           variant="contained"
           color="success"
           startIcon={<AddIcon />}
-          fullWidth
+          onClick={handleOpenCreateEntryDialog}
+          disabled={isLoading}
+          sx={{
+            borderRadius: 2,
+            px: 3,
+            py: isMobile ? 1.5 : 1,
+            minHeight: isMobile ? 48 : 36,
+            fontSize: isMobile ? "0.9rem" : "1rem",
+          }}
+          aria-label="Neuen Abonnenten erstellen"
         >
-          Abonnent anlegen
+          Neuer Abonnent
         </Button>
-        <Button
-          onClick={handleOpenManualEntryDialog}
-          variant="contained"
-          color="primary"
-          startIcon={<EditIcon />}
-          fullWidth
-        >
-          Bestehenden Abonnenten einpflegen
-        </Button>
-      </Box>
-      {role === "Admin" && (
-        <Box sx={{ marginBottom: 3, padding: 2 }}>
-          <Typography variant="h6">Ersteller filtern:</Typography>
-          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            {uniqueOwners.map((owner, index) => (
-              <Button
-                key={index}
-                variant="outlined"
-                onClick={() => setSelectedUser(owner)}
-                color={selectedUser === owner ? "primary" : "default"}
-                sx={{ flex: "1 1 auto" }}
-              >
-                {owner} ({countEntriesByOwner(owner)})
-              </Button>
-            ))}
-            <Button variant="outlined" onClick={() => setSelectedUser("")} fullWidth>
-              Alle anzeigen
-            </Button>
-          </Box>
-        </Box>
-      )}
-      <TextField
-        label="🔍 Suchen nach Benutzername oder Spitzname"
-        variant="outlined"
-        fullWidth
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        sx={{ marginBottom: 3, padding: 2 }}
-      />
-      <Box sx={{ maxHeight: "60vh", overflowY: "auto", padding: 2 }}>
-        {loading ? (
-          <Typography>🚀 Lade Einträge...</Typography>
-        ) : filterEntries.length > 0 ? (
-          filterEntries.map((entry, index) => (
-            <Accordion key={index} sx={{ marginBottom: 2 }}>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                <Typography>
-                  <strong>Erstellt von:</strong> {entry.owner} <br />
-                  <strong> Benutzername:</strong> {entry.username} |{" "}
-                  <strong> Passwort:</strong> {entry.password} |{" "}
-                  <strong> Spitzname:</strong> {entry.aliasNotes}
-                  {entry.note && (
-                    <span style={{ color: "red" }}> ({entry.note})</span>
-                  )}
-                </Typography>
-              </AccordionSummary>
-              <AccordionDetails>
-                <Typography style={{ color: "black" }}>
-                  <strong>Typ:</strong> {entry.type}
-                </Typography>
-                <Typography style={{ color: "black" }}>
-                  <strong>Bouget-Liste:</strong> {entry.bougetList}
-                </Typography>
-                <Typography style={{ color: getStatusColor(entry.status) }}>
-                  <strong>Status:</strong> {entry.status}
-                </Typography>
-                <Typography
-                  style={{ color: getPaymentStatusColor(entry.paymentStatus) }}
-                >
-                  <strong>Zahlung:</strong> {entry.paymentStatus}
-                </Typography>
-                <Typography style={{ color: "black" }}>
-                  <strong>Erstellt am:</strong> {formatDate(entry.createdAt)}
-                </Typography>
-                <Typography style={{ color: "black" }}>
-                  <strong>Gültig bis:</strong> {formatDate(entry.validUntil)}
-                  {entry.extensionRequest && entry.extensionRequest.pending && (
-                    <span style={{ color: "orange" }}>
-                      {" "}
-                      (Anfrage beim Admin gestellt)
-                    </span>
-                  )}
-                  {entry.extensionRequest && entry.extensionRequest.approved && (
-                    <span style={{ color: "green" }}>
-                      {" "}
-                      (Verlängerung genehmigt)
-                    </span>
-                  )}
-                </Typography>
-                <Button
-                  onClick={async () => {
-                    await requestExtension(entry.id);
-                  }}
-                  variant="contained"
-                  color="primary"
-                  sx={{ marginTop: 2 }}
-                >
-                  +1 Jahr verlängern
-                </Button>
-                {role === "Admin" && (
-                  <Box sx={{ marginTop: 2 }}>
-                    <Button
-                      onClick={() =>
-                        changeStatus(
-                          entry.id,
-                          entry.status === "Aktiv" ? "Inaktiv" : "Aktiv"
-                        )
-                      }
-                      variant="contained"
-                      color="secondary"
-                      sx={{ marginRight: 1 }}
-                    >
-                      {entry.status === "Aktiv" ? "Setze Inaktiv" : "Setze Aktiv"}
-                    </Button>
-                    <Button
-                      onClick={() =>
-                        changePaymentStatus(
-                          entry.id,
-                          entry.paymentStatus === "Gezahlt"
-                            ? "Nicht gezahlt"
-                            : "Gezahlt"
-                        )
-                      }
-                      variant="contained"
-                      color="secondary"
-                      sx={{ marginRight: 1 }}
-                    >
-                      {entry.paymentStatus === "Gezahlt"
-                        ? "Setze Nicht gezahlt"
-                        : "Setze Gezahlt"}
-                    </Button>
-                    <Button
-                      onClick={() => deleteEntry(entry.id)}
-                      variant="contained"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                    >
-                      Löschen
-                    </Button>
-                    <Button
-                      onClick={() => approveExtension(entry.id)}
-                      variant="contained"
-                      color="success"
-                      sx={{ marginLeft: 1 }}
-                    >
-                      Verlängerung genehmigen
-                    </Button>
-                  </Box>
-                )}
-                {role === "Admin" && (
-                  <Box sx={{ marginTop: 2 }}>
-                    <Typography variant="body2">
-                      <strong>Verlängerungshistorie:</strong>
-                    </Typography>
-                    {entry.extensionHistory &&
-                    entry.extensionHistory.length > 0 ? (
-                      entry.extensionHistory.map((extension, idx) => {
-                        const approvalDate = extension.approvalDate
-                          ? formatDate(extension.approvalDate)
-                          : "NaN.NaN.NaN";
-                        const validUntil = extension.validUntil
-                          ? formatDate(extension.validUntil)
-                          : "NaN.NaN.NaN";
-                        return (
-                          <Typography key={idx} variant="body2">
-                            Verlängerung genehmigt am: {approvalDate} | Gültig
-                            bis: {validUntil}
-                          </Typography>
-                        );
-                      })
-                    ) : (
-                      <Typography variant="body2">
-                        Keine Verlängerungen vorhanden.
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-              </AccordionDetails>
-            </Accordion>
-          ))
-        ) : (
-          <Typography>🚀 Keine passenden Einträge gefunden.</Typography>
+        {role === "Admin" && (
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<AddIcon />}
+            onClick={handleOpenManualEntryDialog}
+            disabled={isLoading}
+            sx={{
+              borderRadius: 2,
+              px: 3,
+              py: isMobile ? 1.5 : 1,
+              minHeight: isMobile ? 48 : 36,
+              fontSize: isMobile ? "0.9rem" : "1rem",
+            }}
+            aria-label="Bestehenden Abonnenten hinzufügen"
+          >
+            Bestehender Abonnent
+          </Button>
         )}
       </Box>
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleSnackbarClose}
-      >
-        <Alert
-          onClose={handleSnackbarClose}
-          severity="success"
-          sx={{ width: "100%" }}
-        >
-          {snackbarMessage}
-        </Alert>
-      </Snackbar>
+      {isLoading && (
+        <Typography sx={{ textAlign: "center", my: 2, fontSize: isMobile ? "0.9rem" : "1rem" }}>
+          🔄 Lade...
+        </Typography>
+      )}
+      {filteredEntries.length === 0 ? (
+        <Card sx={{ p: isMobile ? 2 : 3, textAlign: "center", boxShadow: 3, borderRadius: 2 }}>
+          <Typography variant="h6" color="textSecondary" sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
+            Keine Einträge gefunden.
+          </Typography>
+        </Card>
+      ) : (
+        <Grid container spacing={isMobile ? 1 : 3}>
+          {filteredEntries.map((entry) => (
+            <Grid item xs={12} sm={6} md={4} key={entry.id}>
+              <Card
+                sx={{
+                  borderRadius: 3,
+                  boxShadow: 4,
+                  bgcolor: role === "Admin" ? OWNER_COLORS[entry.owner] || "#ffffff" : "#ffffff",
+                  transition: "transform 0.2s",
+                  "&:hover": {
+                    transform: "translateY(-4px)",
+                    boxShadow: 6,
+                  },
+                }}
+              >
+                <CardContent sx={{ p: isMobile ? 2 : 3 }}>
+                  <Typography variant="h6" sx={{ fontWeight: "bold", mb: 1, fontSize: isMobile ? "1rem" : "1.25rem" }}>
+                    {entry.aliasNotes}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
+                    Benutzername: {entry.username}
+                  </Typography>
+                  <Typography variant="body2" color="textSecondary" sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
+                    Gültig bis: {formatDate(entry.validUntil)}
+                  </Typography>
+                  <EntryAccordion
+                    entry={entry}
+                    role={role}
+                    loggedInUser={loggedInUser}
+                    setEntries={setEntries}
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
       <Dialog
-        open={openCreateEntryDialog}
-        onClose={() => setOpenCreateEntryDialog(false)}
-        fullScreen
+        open={openCreateDialog}
+        onClose={() => setOpenCreateDialog(false)}
+        fullWidth
+        maxWidth="sm"
+        fullScreen={isMobile}
       >
-        <DialogTitle>Neuen Abonnenten anlegen</DialogTitle>
+        <DialogTitle sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
+          Neuen Abonnenten anlegen
+        </DialogTitle>
         <DialogContent>
-          <TextField
-            label="Spitzname, Notizen etc."
-            fullWidth
-            margin="normal"
-            sx={{ backgroundColor: "#f0f8ff", borderRadius: "5px" }}
-            value={newEntry.aliasNotes}
-            onChange={(e) =>
-              setNewEntry({ ...newEntry, aliasNotes: e.target.value })
-            }
-          />
-          <TextField
-            label="Bouget-Liste (z.B. GER, CH, USA, XXX usw... oder Alles)"
-            fullWidth
-            margin="normal"
-            sx={{ backgroundColor: "#f0f8ff", borderRadius: "5px" }}
-            value={newEntry.bougetList}
-            onChange={(e) =>
-              setNewEntry({ ...newEntry, bougetList: e.target.value })
-            }
-          />
-          <Select
-            fullWidth
-            margin="normal"
-            value={newEntry.type}
-            onChange={(e) => setNewEntry({ ...newEntry, type: e.target.value })}
-          >
-            <MenuItem value="Premium">Premium</MenuItem>
-            <MenuItem value="Basic">Basic</MenuItem>
-          </Select>
           <TextField
             label="Benutzername"
             fullWidth
             margin="normal"
             value={newEntry.username}
             disabled
+            sx={{ bgcolor: "#f0f0f0" }}
+            size={isMobile ? "small" : "medium"}
           />
           <TextField
             label="Passwort"
             fullWidth
             margin="normal"
-            type="password"
+            type="text"
             value={newEntry.password}
             disabled
+            sx={{ bgcolor: "#f0f0f0" }}
+            size={isMobile ? "small" : "medium"}
           />
-          <Typography variant="body1">
-            <strong>Aktuelles Datum:</strong> {formatDate(new Date())}
-          </Typography>
-          <Typography variant="body1">
-            <strong>Gültig bis:</strong> {formatDate(newEntry.validUntil)}{" "}
-          </Typography>
-          <Typography variant="caption" color="textSecondary">
-            Benutzername und Passwort werden automatisch generiert.
-          </Typography>
+          <TextField
+            label="Spitzname, Notizen etc."
+            fullWidth
+            margin="normal"
+            value={newEntry.aliasNotes}
+            onChange={(e) => setNewEntry({ ...newEntry, aliasNotes: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
+          />
+          <TextField
+            label="Bouget-Liste (z.B. GER, CH, USA, XXX usw... oder Alles)"
+            fullWidth
+            margin="normal"
+            value={newEntry.bougetList || ""}
+            onChange={(e) => setNewEntry({ ...newEntry, bougetList: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
+          />
+          <Select
+            fullWidth
+            margin="normal"
+            value={newEntry.type}
+            onChange={(e) => setNewEntry({ ...newEntry, type: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
+          >
+            <MenuItem value="Premium">Premium</MenuItem>
+            <MenuItem value="Basic">Basic</MenuItem>
+          </Select>
         </DialogContent>
         <DialogActions>
           <Button
-            onClick={() => setOpenCreateEntryDialog(false)}
+            onClick={() => setOpenCreateDialog(false)}
             color="secondary"
+            disabled={isLoading}
+            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
           >
             Abbrechen
           </Button>
-          <Button onClick={createEntry} color="primary">
-            Hinzufügen
+          <Button
+            onClick={createEntry}
+            color="primary"
+            disabled={isLoading}
+            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
+          >
+            {isLoading ? "Speichere..." : "Erstellen"}
           </Button>
         </DialogActions>
       </Dialog>
       <Dialog
-        open={openManualEntryDialog}
-        onClose={() => setOpenManualEntryDialog(false)}
-        fullScreen
+        open={openManualDialog}
+        onClose={() => setOpenManualDialog(false)}
+        fullWidth
+        maxWidth="sm"
+        fullScreen={isMobile}
       >
-        <DialogTitle>Bestehenden Abonnenten einpflegen</DialogTitle>
+        <DialogTitle sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
+          Bestehenden Abonnenten einpflegen
+        </DialogTitle>
         <DialogContent>
           <TextField
             label="Benutzername"
             fullWidth
             margin="normal"
             value={manualEntry.username}
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, username: e.target.value })
-            }
+            onChange={(e) => setManualEntry({ ...manualEntry, username: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           />
           <TextField
             label="Passwort"
             fullWidth
             margin="normal"
-            type="password"
+            type="text"
             value={manualEntry.password}
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, password: e.target.value })
-            }
+            onChange={(e) => setManualEntry({ ...manualEntry, password: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           />
           <TextField
             label="Spitzname, Notizen etc."
             fullWidth
             margin="normal"
             value={manualEntry.aliasNotes}
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, aliasNotes: e.target.value })
-            }
+            onChange={(e) => setManualEntry({ ...manualEntry, aliasNotes: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           />
           <TextField
             label="Bouget-Liste (z.B. GER, CH, USA, XXX usw... oder Alles)"
             fullWidth
             margin="normal"
-            value={manualEntry.bougetList}
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, bougetList: e.target.value })
-            }
+            value={manualEntry.bougetList || ""}
+            onChange={(e) => setManualEntry({ ...manualEntry, bougetList: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           />
           <Select
             fullWidth
             margin="normal"
             value={manualEntry.type}
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, type: e.target.value })
-            }
+            onChange={(e) => setManualEntry({ ...manualEntry, type: e.target.value })}
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           >
             <MenuItem value="Premium">Premium</MenuItem>
             <MenuItem value="Basic">Basic</MenuItem>
@@ -901,44 +563,55 @@ const EntryList = ({ entries, setEntries, role, loggedInUser }) => {
             fullWidth
             margin="normal"
             type="date"
-            value={manualEntry.validUntil.toISOString().split("T")[0]}
-            onChange={(e) =>
-              setManualEntry({
-                ...manualEntry,
-                validUntil: new Date(e.target.value),
-              })
+            value={
+              manualEntry.validUntil
+                ? new Date(manualEntry.validUntil).toISOString().split("T")[0]
+                : ""
             }
+            onChange={(e) =>
+              setManualEntry({ ...manualEntry, validUntil: new Date(e.target.value) })
+            }
+            disabled={isLoading}
+            size={isMobile ? "small" : "medium"}
           />
-          <Typography variant="body1">
-            <strong>Aktuelles Datum:</strong> {formatDate(new Date())}
-          </Typography>
-          <Typography variant="body1">
-            <strong>Gültig bis:</strong> {formatDate(manualEntry.validUntil)}{" "}
-          </Typography>
-          <Typography variant="caption" color="textSecondary">
-            Hier trägst du deine bereits aktiven Mitglieder ein.
-          </Typography>
+          {role === "Admin" && (
+            <TextField
+              label="Admin-Gebühr (€)"
+              fullWidth
+              margin="normal"
+              value={manualEntry.admin_fee || ""}
+              onChange={(e) => {
+                const value = e.target.value.replace(/[^0-9]/g, "");
+                const numValue = value ? parseInt(value) : null;
+                if (numValue > 999) return;
+                setManualEntry({ ...manualEntry, admin_fee: numValue });
+              }}
+              inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
+              disabled={isLoading}
+              size={isMobile ? "small" : "medium"}
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button
-            onClick={() => setOpenManualEntryDialog(false)}
+            onClick={() => setOpenManualDialog(false)}
             color="secondary"
+            disabled={isLoading}
+            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
           >
             Abbrechen
           </Button>
-          <Button onClick={handleAddManualEntry} color="primary">
-            Hinzufügen
+          <Button
+            onClick={handleAddManualEntry}
+            color="primary"
+            disabled={isLoading}
+            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
+          >
+            {isLoading ? "Speichere..." : "Hinzufügen"}
           </Button>
         </DialogActions>
       </Dialog>
-      <BottomNavigation
-        sx={{ position: "fixed", bottom: 0, left: 0, right: 0 }}
-      >
-        <BottomNavigationAction label="Neu" icon={<AddIcon />} onClick={handleOpenCreateEntryDialog} />
-        <BottomNavigationAction label="Bearbeiten" icon={<EditIcon />} onClick={handleOpenManualEntryDialog} />
-        <BottomNavigationAction label="Backup" icon={<BackupIcon />} onClick={exportEntries} />
-      </BottomNavigation>
-    </div>
+    </Box>
   );
 };
 
