@@ -12,41 +12,54 @@ import {
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
 import { styled } from "@mui/system";
-// Stile definieren
-const StyledCard = styled(Card)({
-  backgroundColor: "#93c5fd",
-  borderRadius: "15px",
-  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.2)",
-});
-const StyledButton = styled(Button)({
+
+const StyledCard = styled(Card)(({ theme }) => ({
+  backgroundColor: "#f0f9ff",
   borderRadius: "20px",
-  boxShadow: "0 4px 20px rgba(0, 0, 0, 0.5)",
+  boxShadow: "0 4px 15px rgba(0, 0, 0, 0.1)",
+  padding: "10px",
+  maxWidth: "400px",
+  margin: "auto",
+  [theme.breakpoints.down("sm")]: {
+    maxWidth: "90%",
+    padding: "5px",
+  },
+}));
+
+const StyledButton = styled(Button)({
+  borderRadius: "25px",
+  padding: "10px 20px",
+  backgroundColor: "#60a5fa",
+  "&:hover": { backgroundColor: "#3b82f6" },
 });
+
 const StyledTextField = styled(TextField)({
   backgroundColor: "#fff",
   borderRadius: "10px",
-  marginBottom: "10px",
+  marginBottom: "15px",
 });
+
 const StyledTitle = styled(Typography)({
-  color: "#1e3a8a",
+  color: "#1e40af",
   marginBottom: "20px",
+  fontWeight: "bold",
 });
-// LoginForm-Komponente
+
 const LoginForm = ({ handleLogin }) => {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
   return (
     <StyledCard>
       <CardContent>
-        <StyledTitle variant="h5" component="h2" align="center">
-          Willkommen bei Luca-TV
+        <StyledTitle variant="h5" align="center">
+          🌟 Willkommen bei Luca-TV-PT.2
         </StyledTitle>
         <StyledTextField
           label="👤 Benutzername"
           variant="outlined"
           fullWidth
-          margin="normal"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
@@ -55,7 +68,6 @@ const LoginForm = ({ handleLogin }) => {
           type={showPassword ? "text" : "password"}
           variant="outlined"
           fullWidth
-          margin="normal"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           InputProps={{
@@ -64,7 +76,6 @@ const LoginForm = ({ handleLogin }) => {
                 <IconButton
                   onClick={() => setShowPassword(!showPassword)}
                   edge="end"
-                  aria-label="Toggle password visibility"
                 >
                   {showPassword ? <VisibilityOff /> : <Visibility />}
                 </IconButton>
@@ -77,7 +88,6 @@ const LoginForm = ({ handleLogin }) => {
         <StyledButton
           onClick={() => handleLogin(username, password)}
           variant="contained"
-          color="primary"
           fullWidth
         >
           🚀 Login
@@ -86,4 +96,5 @@ const LoginForm = ({ handleLogin }) => {
     </StyledCard>
   );
 };
+
 export default LoginForm;
