@@ -1,39 +1,9 @@
-import React, { useEffect, useState } from "react";
-import {
-  Typography,
-  List,
-  ListItem,
-  ListItemText,
-  Divider,
-} from "@mui/material";
-import { supabase } from "./supabaseClient";
+import React from "react";
+import { Typography, List, ListItem, ListItemText, Divider } from "@mui/material";
+import { useMessages } from "./utils";
 
 const MessageList = ({ loggedInUser, selectedUser }) => {
-  const [messages, setMessages] = useState([]);
-
-  useEffect(() => {
-    fetchMessages();
-  }, [loggedInUser, selectedUser]);
-
-  const fetchMessages = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .or(
-          `and(sender.eq.${loggedInUser},receiver.eq.${selectedUser}),and(sender.eq.${selectedUser},receiver.eq.${loggedInUser})`
-        )
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        console.error("Fehler beim Abrufen der Nachrichten:", error);
-      } else {
-        setMessages(data);
-      }
-    } catch (error) {
-      console.error("Fehler beim Abrufen der Nachrichten:", error);
-    }
-  };
+  const { messages } = useMessages(loggedInUser, selectedUser);
 
   return (
     <div>
@@ -46,9 +16,7 @@ const MessageList = ({ loggedInUser, selectedUser }) => {
             <ListItem>
               <ListItemText
                 primary={msg.message}
-                secondary={`Von: ${msg.sender} am ${new Date(
-                  msg.created_at
-                ).toLocaleString()}`}
+                secondary={`Von: ${msg.sender} am ${new Date(msg.created_at).toLocaleString()}`}
               />
             </ListItem>
             <Divider />
