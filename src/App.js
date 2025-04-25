@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Suspense, lazy } from "react";
+import React, { useState, useEffect, Suspense, lazy, useCallback, useMemo } from "react";
 import {
   Container,
   Typography,
@@ -8,20 +8,37 @@ import {
   Button,
   Snackbar,
   Box,
-  Select,
-  MenuItem,
-  TextField,
   Alert,
+  TextField,
+  Badge,
+  Menu,
+  MenuItem,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
+import BackupIcon from "@mui/icons-material/Backup";
+import DescriptionIcon from "@mui/icons-material/Description";
+import MenuIcon from "@mui/icons-material/Menu";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { styled, ThemeProvider, createTheme } from "@mui/material/styles";
 import { supabase } from "./supabaseClient";
-import ChatMessage from "./ChatMessage"; // Importiere die ChatMessage-Komponente
+import ChatMessage from "./ChatMessage";
+import { useMessages, handleError } from "./utils";
+import { USER_CREDENTIALS, USER_EMOJIS, THEME_CONFIG, GUIDES } from "./config";
+import { useSnackbar } from "./useSnackbar";
 
-// Dynamischer Import der Komponenten
 const LoginForm = lazy(() => import("./LoginForm"));
 const EntryList = lazy(() => import("./EntryList"));
+const AdminDashboard = lazy(() => import("./AdminDashboard"));
 
-// Styling
 const StyledContainer = styled(Container)(({ theme }) => ({
   backgroundColor: theme.palette.background.default,
   minHeight: "100vh",
@@ -33,34 +50,9 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
   backgroundColor: theme.palette.primary.main,
 }));
 
-// Benutzer-Emojis
-const userEmojis = {
-  Admin: "👑",
-  Scholli: "🚀",
-  Jamaica05: "🎩",
-};
+const theme = createTheme(THEME_CONFIG);
 
-// Erstellen des Themes
-const theme = createTheme({
-  palette: {
-    primary: {
-      main: "#3b82f6", // Ihre Hauptfarbe
-    },
-    secondary: {
-      main: "#dc004e", // Ihre Sekundärfarbe
-    },
-    background: {
-      default: "#e0e7ff", // Hintergrundfarbe der Anwendung
-      paper: "#ffffff", // Hintergrundfarbe für Papierelemente
-    },
-    text: {
-      primary: "#333", // Textfarbe
-    },
-  },
-});
-
-// Wiederverwendbare Snackbar-Komponente
-const CustomSnackbar = ({ open, message, onClose, severity = "success" }) => (
+const CustomSnackbar = ({ open, message, onClose, severity }) => (
   <Snackbar open={open} autoHideDuration={4000} onClose={onClose}>
     <Alert onClose={onClose} severity={severity} sx={{ width: "100%" }}>
       {message}
@@ -69,269 +61,409 @@ const CustomSnackbar = ({ open, message, onClose, severity = "success" }) => (
 );
 
 const App = () => {
-  // Zustand für Benutzer & Rollen
-  const [loggedInUser, setLoggedInUser] = useState(
-    () => localStorage.getItem("loggedInUser") || null
-  );
+  const [loggedInUser, setLoggedInUser] = useState(() => localStorage.getItem("loggedInUser") || null);
   const [role, setRole] = useState(() => localStorage.getItem("role") || null);
-  const [entries, setEntries] = useState([]); // Einträge werden jetzt von Supabase abgerufen
-  const [messages, setMessages] = useState([]); // Zustand für Nachrichten
-  const [selectedUser, setSelectedUser] = useState("Admin"); // Zustand für den ausgewählten Chat-Partner
-  const [newMessage, setNewMessage] = useState(""); // Zustand für die neue Nachricht
+  const [selectedUser, setSelectedUser] = useState(role === "Admin" ? "Scholli" : "Admin");
+  const [newMessage, setNewMessage] = useState("");
+  const [entries, setEntries] = useState([]);
+  const [file, setFile] = useState(null);
+  const [menuAnchorEl, setMenuAnchorEl] = useState(null);
+  const [guidesAnchorEl, setGuidesAnchorEl] = useState(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [openCreateDialog, setOpenCreateDialog] = useState(false);
+  const [openManualDialog, setOpenManualDialog] = useState(false);
 
-  // Zustand für Snackbar
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState("");
-  const [snackbarSeverity, setSnackbarSeverity] = useState("success");
+  const { messages, unreadCount, markAsRead } = useMessages(loggedInUser, selectedUser);
+  const { snackbarOpen, snackbarMessage, snackbarSeverity, showSnackbar, closeSnackbar } = useSnackbar();
 
-  // Funktion zum Anzeigen von Snackbar-Nachrichten
-  const showSnackbar = (message, severity = "success") => {
-    setSnackbarMessage(message);
-    setSnackbarSeverity(severity);
-    setSnackbarOpen(true);
-  };
-
-  // Nachrichten von Supabase abrufen
-  const fetchMessages = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .or(
-          `and(sender.eq.${loggedInUser},receiver.eq.${selectedUser}),and(sender.eq.${selectedUser},receiver.eq.${loggedInUser})`
-        )
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        throw new Error("Fehler beim Abrufen der Nachrichten: " + error.message);
-      }
-      setMessages(data);
-    } catch (error) {
-      console.error(error);
-      showSnackbar(error.message, "error");
-    }
-  };
-
-  // Realtime-Updates für Nachrichten
-  useEffect(() => {
-    if (loggedInUser) {
-      // Abonniere Änderungen in der `messages`-Tabelle
-      const subscription = supabase
-        .channel("messages")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "messages" },
-          (payload) => {
-            // Neue Nachricht zur Liste hinzufügen
-            setMessages((prevMessages) => [...prevMessages, payload.new]);
-          }
-        )
-        .subscribe();
-
-      // Initiale Nachrichten laden
-      fetchMessages();
-
-      // Abonnement beenden, wenn die Komponente unmountet
-      return () => {
-        supabase.removeChannel(subscription);
-      };
-    }
-  }, [loggedInUser, selectedUser]);
-
-  // Login-Logik
-  const handleLogin = (username, password) => {
-    const users = {
-      Admin: "Admino25!",
-      Scholli: "Scholli25",
-      Jamaica05: "Werwer55",
-    };
-
-    if (users[username] === password) {
+  const handleLogin = useCallback((username, password) => {
+    if (USER_CREDENTIALS[username] === password) {
       setLoggedInUser(username);
       setRole(username === "Admin" ? "Admin" : "Friend");
-
-      // Zustand im localStorage speichern
       localStorage.setItem("loggedInUser", username);
       localStorage.setItem("role", username === "Admin" ? "Admin" : "Friend");
-
-      // Snackbar anzeigen
+      setSelectedUser(username === "Admin" ? "Scholli" : "Admin");
       showSnackbar(`✅ Willkommen, ${username}!`);
     } else {
-      // Snackbar für falsches Passwort anzeigen
       showSnackbar("❌ Ungültige Zugangsdaten", "error");
     }
-  };
+  }, [showSnackbar]);
 
-  // Logout-Logik
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setLoggedInUser(null);
     setRole(null);
-
-    // Zustand aus localStorage entfernen
     localStorage.removeItem("loggedInUser");
     localStorage.removeItem("role");
-
-    // Snackbar anzeigen
     showSnackbar("🔓 Erfolgreich abgemeldet!");
-  };
+  }, [showSnackbar]);
 
-  // Funktion zum Senden einer Nachricht
-  const sendMessage = async () => {
+  const sendMessage = useCallback(async () => {
     if (!newMessage.trim()) {
       showSnackbar("❌ Nachricht darf nicht leer sein", "error");
       return;
     }
-
+    setIsLoading(true);
     try {
-      const { error } = await supabase.from("messages").insert([
-        {
-          sender: loggedInUser,
-          receiver: selectedUser,
-          message: newMessage,
-        },
-      ]);
-
-      if (error) {
-        throw new Error("Fehler beim Senden der Nachricht: " + error.message);
-      }
-      setNewMessage(""); // Eingabefeld leeren
+      const { error } = await supabase
+        .from("messages")
+        .insert([{ sender: loggedInUser, receiver: selectedUser, message: newMessage, read: false }]);
+      if (error) throw error;
+      setNewMessage("");
     } catch (error) {
-      console.error(error);
-      showSnackbar(error.message, "error");
+      handleError(error, showSnackbar);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [newMessage, loggedInUser, selectedUser, showSnackbar]);
+
+  const fetchEntries = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.from("entries").select("*");
+      if (error) throw error;
+      setEntries(data);
+    } catch (error) {
+      handleError(error, showSnackbar);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [showSnackbar]);
+
+  useEffect(() => {
+    if (loggedInUser) {
+      fetchEntries();
+    }
+  }, [loggedInUser, fetchEntries]);
+
+  const exportEntries = useCallback(() => {
+    const dataStr = JSON.stringify(entries, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "backup_entries.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showSnackbar("Backup erfolgreich erstellt!");
+    setMenuAnchorEl(null);
+  }, [entries, showSnackbar]);
+
+  const handleFileChange = useCallback((event) => {
+    setFile(event.target.files[0]);
+  }, []);
+
+  const importBackup = useCallback(async () => {
+    if (!file) {
+      showSnackbar("Bitte wählen Sie eine Datei aus.", "error");
+      return;
+    }
+    setIsLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const jsonData = JSON.parse(e.target.result);
+        for (const entry of jsonData) {
+          const { error } = await supabase.from("entries").insert([entry]);
+          if (error) throw error;
+        }
+        setEntries((prev) => [...prev, ...jsonData]);
+        showSnackbar("Backup erfolgreich importiert!");
+        setFile(null);
+        setImportDialogOpen(false);
+      } catch (error) {
+        handleError(error, showSnackbar);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    reader.readAsText(file);
+  }, [file, showSnackbar]);
+
+  const handleMenuClick = useCallback((event) => {
+    setMenuAnchorEl(event.currentTarget);
+  }, []);
+
+  const handleMenuClose = useCallback(() => {
+    setMenuAnchorEl(null);
+    setGuidesAnchorEl(null);
+  }, []);
+
+  const handleImportOpen = useCallback(() => {
+    setImportDialogOpen(true);
+    setMenuAnchorEl(null);
+  }, []);
+
+  const handleGuidesClick = useCallback((event) => {
+    setGuidesAnchorEl(event.currentTarget || menuAnchorEl);
+  }, [menuAnchorEl]);
+
+  const handleGuidesClose = useCallback(() => {
+    setGuidesAnchorEl(null);
+  }, []);
+
+  const handleGuideDownload = useCallback((path) => {
+    window.open(path, "_blank");
+    setGuidesAnchorEl(null);
+    setMenuAnchorEl(null);
+  }, []);
+
+  const themeInstance = useTheme();
+  const isMobile = useMediaQuery(themeInstance.breakpoints.down("sm"));
+
+  useEffect(() => {
+    if (selectedUser && messages.length > 0) {
+      markAsRead();
+    }
+  }, [selectedUser, messages, markAsRead]);
+
+  const reversedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   return (
     <ThemeProvider theme={theme}>
-      <StyledContainer>
+      <StyledContainer maxWidth="xl">
         <StyledAppBar position="static">
           <Toolbar>
-            <Typography variant="h6">Eintragsverwaltung</Typography>
+            <Typography variant="h6">Luca-TV</Typography>
             {loggedInUser && (
               <Typography
                 variant="h6"
                 sx={{ marginLeft: "auto", marginRight: 2, fontSize: { xs: "14px", sm: "16px" } }}
               >
-                {userEmojis[loggedInUser]} {loggedInUser}
+                {USER_EMOJIS[loggedInUser]} {loggedInUser}
               </Typography>
             )}
             {loggedInUser && (
-              <Button onClick={handleLogout} color="inherit" sx={{ fontSize: { xs: "12px", sm: "14px" } }}>
+              <Box sx={{ marginRight: 2 }}>
+                {isMobile ? (
+                  <IconButton variant="contained" color="secondary" onClick={handleMenuClick} sx={{ p: 0.5 }}>
+                    <MenuIcon />
+                  </IconButton>
+                ) : (
+                  <>
+                    {role === "Admin" && (
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<BackupIcon />}
+                        onClick={handleMenuClick}
+                        sx={{ mr: 1, borderRadius: 2 }}
+                      >
+                        Backup
+                      </Button>
+                    )}
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      startIcon={<DescriptionIcon />}
+                      onClick={handleGuidesClick}
+                      sx={{ borderRadius: 2 }}
+                    >
+                      Anleitungen
+                    </Button>
+                  </>
+                )}
+                {isMobile ? (
+                  <Menu anchorEl={menuAnchorEl} open={Boolean(menuAnchorEl)} onClose={handleMenuClose}>
+                    {role === "Admin" && (
+                      <>
+                        <MenuItem onClick={exportEntries}>Backup erstellen</MenuItem>
+                        <MenuItem onClick={handleImportOpen}>Backup importieren</MenuItem>
+                      </>
+                    )}
+                    <MenuItem
+                      onClick={() => {
+                        handleGuidesClick({ currentTarget: menuAnchorEl });
+                        setMenuAnchorEl(null);
+                      }}
+                    >
+                      Anleitungen
+                    </MenuItem>
+                  </Menu>
+                ) : (
+                  <>
+                    <Menu anchorEl={menuAnchorEl} open={Boolean(menuAnchorEl)} onClose={handleMenuClose}>
+                      {role === "Admin" && (
+                        <>
+                          <MenuItem onClick={exportEntries}>Backup erstellen</MenuItem>
+                          <MenuItem onClick={handleImportOpen}>Backup importieren</MenuItem>
+                        </>
+                      )}
+                    </Menu>
+                    <Menu anchorEl={guidesAnchorEl} open={Boolean(guidesAnchorEl)} onClose={handleGuidesClose}>
+                      {GUIDES.map((guide) => (
+                        <MenuItem key={guide.name} onClick={() => handleGuideDownload(guide.path)}>
+                          {guide.name}
+                        </MenuItem>
+                      ))}
+                    </Menu>
+                  </>
+                )}
+              </Box>
+            )}
+            {loggedInUser && (
+              <Button
+                onClick={handleLogout}
+                color="inherit"
+                sx={{ fontSize: { xs: "12px", sm: "16px" }, borderRadius: 2 }}
+              >
                 🔓 Logout
               </Button>
             )}
           </Toolbar>
         </StyledAppBar>
         <Suspense fallback={<div>🔄 Lade...</div>}>
+          {isLoading && <Typography sx={{ mt: 2 }}>🔄 Lade Daten...</Typography>}
           {!loggedInUser ? (
-            <Grid
-              container
-              justifyContent="center"
-              style={{ marginTop: "20px" }}
-            >
+            <Grid container justifyContent="center" sx={{ mt: 4 }}>
               <Grid item xs={12} sm={6} md={4}>
                 <LoginForm handleLogin={handleLogin} />
               </Grid>
             </Grid>
           ) : (
-            <>
-              {/* Chat nach oben versetzen */}
-              <Box
-                sx={{
-                  marginTop: 2,
-                  marginBottom: 2,
-                  border: "1px solid #ccc",
-                  borderRadius: 2,
-                  padding: 2,
-                  backgroundColor: "#fff",
-                }}
-              >
-                <Typography variant="h6" gutterBottom>
-                  Chatverlauf mit {selectedUser}
-                </Typography>
-
-                {/* Auswahl des Chat-Partners (nur für Admin) */}
-                {role === "Admin" && (
-                  <Select
-                    value={selectedUser}
-                    onChange={(e) => setSelectedUser(e.target.value)}
-                    fullWidth
-                    sx={{ marginBottom: 2 }}
-                  >
-                    <MenuItem value="Admin">Admin</MenuItem>
-                    <MenuItem value="Scholli">Scholli</MenuItem>
-                    <MenuItem value="Jamaica05">Jamaica05</MenuItem>
-                  </Select>
-                )}
-
-                {/* Scrollbarer Bereich für den Chatverlauf */}
-                <Box
-                  sx={{
-                    maxHeight: { xs: "200px", sm: "300px" }, // Höhe für mobile und Desktop
-                    overflowY: "auto",
-                    marginBottom: 2,
-                  }}
-                >
-                  {messages.map((msg) => (
-                    <ChatMessage
-                      key={msg.id}
-                      message={msg.message}
-                      sender={msg.sender}
-                      timestamp={msg.created_at}
-                      isOwnMessage={msg.sender === loggedInUser}
-                    />
-                  ))}
-                </Box>
-
-                {/* Eingabefeld für neue Nachrichten */}
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: { xs: "column", sm: "row" }, // Vertikal auf mobil, horizontal auf Desktop
-                    gap: 1,
-                    alignItems: "center",
-                  }}
-                >
-                  <TextField
-                    label="Neue Nachricht"
-                    variant="outlined"
-                    fullWidth
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === "Enter") {
-                        sendMessage();
-                      }
-                    }}
+            <Box sx={{ mt: 2 }}>
+              <Accordion expanded={chatExpanded} onChange={() => setChatExpanded(!chatExpanded)} sx={{ mb: 2, borderRadius: 2 }}>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography variant="h6">Chat mit {selectedUser}</Typography>
+                  {role === "Admin" && (
+                    <Box sx={{ display: "flex", gap: 1, ml: 2 }}>
+                      <Badge badgeContent={unreadCount["Scholli"] || 0} color="error">
+                        <Button
+                          variant={selectedUser === "Scholli" ? "contained" : "outlined"}
+                          color="primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedUser("Scholli");
+                          }}
+                          sx={{ minWidth: 0, p: 0.5, borderRadius: 2 }}
+                        >
+                          Scholli {USER_EMOJIS["Scholli"]}
+                        </Button>
+                      </Badge>
+                      <Badge badgeContent={unreadCount["Jamaica05"] || 0} color="error">
+                        <Button
+                          variant={selectedUser === "Jamaica05" ? "contained" : "outlined"}
+                          color="primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedUser("Jamaica05");
+                          }}
+                          sx={{ minWidth: 0, p: 0.5, borderRadius: 2 }}
+                        >
+                          Jamaica05 {USER_EMOJIS["Jamaica05"]}
+                        </Button>
+                      </Badge>
+                    </Box>
+                  )}
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1, mb: 2 }}>
+                      <TextField
+                        label="Neue Nachricht"
+                        variant="outlined"
+                        fullWidth
+                        multiline
+                        rows={2}
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            sendMessage();
+                          }
+                        }}
+                        disabled={isLoading}
+                        sx={{ backgroundColor: "white", borderRadius: 2 }}
+                      />
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={sendMessage}
+                        sx={{ width: { xs: "100%", sm: "auto" }, borderRadius: 2, alignSelf: "flex-end" }}
+                        disabled={isLoading || !newMessage.trim()}
+                      >
+                        {isLoading ? "Sende..." : "Senden"}
+                      </Button>
+                    </Box>
+                    <Box sx={{ maxHeight: "50vh", overflowY: "auto" }}>
+                      {reversedMessages.map((msg) => (
+                        <ChatMessage
+                          key={msg.id}
+                          message={msg.message}
+                          sender={msg.sender}
+                          timestamp={msg.created_at}
+                          isOwnMessage={msg.sender === loggedInUser}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+              {role === "Admin" ? (
+                <>
+                  <AdminDashboard
+                    entries={entries}
+                    loggedInUser={loggedInUser}
+                    setOpenCreateDialog={setOpenCreateDialog}
+                    setOpenManualDialog={setOpenManualDialog}
+                    setEntries={setEntries}
                   />
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={sendMessage}
-                    sx={{ width: { xs: "100%", sm: "auto" } }} // Volle Breite auf mobil
-                  >
-                    Senden
-                  </Button>
-                </Box>
-              </Box>
-
-              {/* EntryList-Komponente */}
-              <EntryList
-                entries={entries}
-                setEntries={setEntries}
-                role={role}
-                loggedInUser={loggedInUser}
-              />
-            </>
+                  <EntryList
+                    role={role}
+                    loggedInUser={loggedInUser}
+                    entries={entries}
+                    setEntries={setEntries}
+                    openCreateDialog={openCreateDialog}
+                    setOpenCreateDialog={setOpenCreateDialog}
+                    openManualDialog={openManualDialog}
+                    setOpenManualDialog={setOpenManualDialog}
+                  />
+                </>
+              ) : (
+                <EntryList
+                  role={role}
+                  loggedInUser={loggedInUser}
+                  entries={entries}
+                  setEntries={setEntries}
+                  openCreateDialog={openCreateDialog}
+                  setOpenCreateDialog={setOpenCreateDialog}
+                  openManualDialog={openManualDialog}
+                  setOpenManualDialog={setOpenManualDialog}
+                />
+              )}
+            </Box>
           )}
         </Suspense>
-        {/* Snackbar für Feedback */}
         <CustomSnackbar
           open={snackbarOpen}
           message={snackbarMessage}
-          onClose={() => setSnackbarOpen(false)}
+          onClose={closeSnackbar}
           severity={snackbarSeverity}
         />
+        <Dialog open={importDialogOpen} onClose={() => setImportDialogOpen(false)}>
+          <DialogTitle>Backup importieren</DialogTitle>
+          <DialogContent>
+            <input type="file" accept=".json" onChange={handleFileChange} disabled={isLoading} />
+            {file && (
+              <Typography sx={{ mt: 2 }}>
+                Ausgewählte Datei: {file.name}
+              </Typography>
+            )}
+            {isLoading && <Typography>🔄 Importiere...</Typography>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setImportDialogOpen(false)} color="secondary" disabled={isLoading}>
+              Abbrechen
+            </Button>
+            <Button onClick={importBackup} color="primary" disabled={isLoading || !file}>
+              {isLoading ? "Importiere..." : "Importieren"}
+            </Button>
+          </DialogActions>
+        </Dialog>
       </StyledContainer>
     </ThemeProvider>
   );
