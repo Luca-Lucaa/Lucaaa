@@ -1,617 +1,416 @@
-import React, { useState, useMemo, useCallback } from "react";
-import {
-  Typography,
-  TextField,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Box,
-  Select,
-  MenuItem,
-  Card,
-  CardContent,
-  Grid,
-  useMediaQuery,
-  useTheme,
-} from "@mui/material";
-import AddIcon from "@mui/icons-material/Add";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
-import { formatDate, generateUsername, useDebounce, handleError } from "./utils";
+import { formatDate, handleError } from "./utils";
 import { useSnackbar } from "./useSnackbar";
-import { OWNER_COLORS } from "./config";
-import EntryAccordion from "./EntryAccordion";
 
-const EntryList = ({
-  role,
-  loggedInUser,
-  entries,
-  setEntries,
-  openCreateDialog,
-  setOpenCreateDialog,
-  openManualDialog,
-  setOpenManualDialog,
-}) => {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [paymentFilter, setPaymentFilter] = useState("");
-  const [ownerFilter, setOwnerFilter] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [newEntry, setNewEntry] = useState({
+const EntryList = ({ role, loggedInUser, setEntries, entries }) => {
+  const [openModal, setOpenModal] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [formData, setFormData] = useState({
     username: "",
+    nickname: "",
     password: "",
-    aliasNotes: "",
-    type: "Premium",
-    status: "Inaktiv",
-    paymentStatus: "Nicht gezahlt",
-    createdAt: new Date(),
-    validUntil: new Date(new Date().getFullYear(), 11, 31),
-    owner: loggedInUser,
-    extensionHistory: [],
-    bougetList: "",
-    admin_fee: null,
-    extensionRequest: null,
+    package: "premium",
+    createdBy: loggedInUser,
+    status: "active",
   });
-  const [manualEntry, setManualEntry] = useState({
-    username: "",
-    password: "",
-    aliasNotes: "",
-    type: "Premium",
-    validUntil: new Date(new Date().getFullYear(), 11, 31),
-    owner: loggedInUser,
-    extensionHistory: [],
-    bougetList: "",
-    admin_fee: null,
-    extensionRequest: null,
-  });
-
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [packageFilter, setPackageFilter] = useState("all");
   const { showSnackbar } = useSnackbar();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const owners = useMemo(() => {
-    const uniqueOwners = [...new Set(entries.map((entry) => entry.owner))];
-    return uniqueOwners.sort();
-  }, [entries]);
-
+  // Einträge filtern
   const filteredEntries = useMemo(() => {
-    let filtered = entries;
-    if (role !== "Admin") {
-      filtered = entries.filter((entry) => entry.owner === loggedInUser);
-    } else if (ownerFilter) {
-      filtered = filtered.filter((entry) => entry.owner === ownerFilter);
-    }
-    if (debouncedSearchTerm) {
-      filtered = filtered.filter(
+    let result = entries;
+
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
         (entry) =>
-          entry.username.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
-          entry.aliasNotes.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+          entry.username?.toLowerCase().includes(query) ||
+          entry.aliasNotes?.toLowerCase().includes(query)
       );
     }
-    if (statusFilter) {
-      filtered = filtered.filter((entry) => entry.status === statusFilter);
+
+    if (statusFilter !== "all") {
+      result = result.filter((entry) => entry.status.toLowerCase() === statusFilter);
     }
-    if (paymentFilter) {
-      filtered = filtered.filter((entry) => entry.paymentStatus === paymentFilter);
+    if (packageFilter !== "all") {
+      result = result.filter((entry) => entry.package === packageFilter);
     }
-    return filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }, [
-    entries,
-    role,
-    loggedInUser,
-    debouncedSearchTerm,
-    statusFilter,
-    paymentFilter,
-    ownerFilter,
-  ]);
 
-  const calculateTotalFeesForOwner = useCallback(
-    (owner) => {
-      const ownerEntries = entries.filter((entry) => entry.owner === owner);
-      return ownerEntries.reduce((total, entry) => total + (entry.admin_fee || 0), 0);
-    },
-    [entries]
-  );
+    return result.sort((a, b) => {
+      const dateA = new Date(a.validUntil || "1970-01-01");
+      const dateB = new Date(b.validUntil || "1970-01-01");
+      return dateA - dateB;
+    });
+  }, [entries, searchQuery, statusFilter, packageFilter]);
 
-  const countEntriesByOwner = useCallback(
-    (owner) => {
-      return entries.filter((entry) => entry.owner === owner).length;
-    },
-    [entries]
-  );
+  // Preisrechnung
+  const calculatePrice = (packageType) => {
+    const endOfYear = new Date(new Date().getFullYear(), 11, 31);
+    const daysInYear = (endOfYear - new Date(new Date().getFullYear(), 0, 1)) / (1000 * 60 * 60 * 24);
+    const daysRemaining = (endOfYear - new Date()) / (1000 * 60 * 60 * 24);
+    const fullYearPrice = packageType === "premium" ? 120 : 100;
+    const proratedPrice = Math.round((fullYearPrice * daysRemaining / daysInYear) * 100) / 100;
+    return { proratedPrice, daysRemaining: Math.ceil(daysRemaining) };
+  };
 
-  const entryCount = countEntriesByOwner(loggedInUser);
+  // Eintrag erstellen oder bearbeiten
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    const { username, nickname, password, package: pkg, createdBy, status } = formData;
 
-  const milestones = [5, 10, 15, 20, 25, 50, 100];
-  const nextMilestone = milestones.find((milestone) => milestone > entryCount) || 100;
-  const progressToNext = nextMilestone - entryCount;
-
-  const motivationalPhrases = [
-    "Super Arbeit!",
-    "Fantastisch gemacht!",
-    "Du rockst das!",
-    "Unglaublich gut!",
-    "Weiter so, Champion!",
-    "Beeindruckend!",
-    "Toll drauf!",
-  ];
-
-  const motivationMessage = useMemo(() => {
-    const randomPhrase = motivationalPhrases[Math.floor(Math.random() * motivationalPhrases.length)];
-    if (entryCount === 0) {
-      return "🎉 Du hast noch keine Einträge erstellt. Lass uns mit dem ersten beginnen!";
-    } else if (entryCount >= 100) {
-      return `🎉 ${randomPhrase} Du hast ${entryCount} Einträge erreicht! Du bist ein wahrer Meister!`;
-    } else {
-      return `🎉 ${randomPhrase} Du hast ${entryCount} Einträge erreicht! Nur noch ${progressToNext} bis ${nextMilestone}!`;
+    if (!username || !password || !createdBy) {
+      showSnackbar("Bitte alle Pflichtfelder ausfüllen.", "error");
+      return;
     }
-  }, [entryCount]);
 
-  const handleOpenCreateEntryDialog = useCallback(() => {
-    const username = generateUsername(loggedInUser);
-    const randomPassword = Math.random().toString(36).slice(-8);
-    setNewEntry({
+    const endDate = new Date(new Date().getFullYear(), 11, 31);
+    const priceInfo = calculatePrice(pkg);
+    const entryData = {
       username,
-      password: randomPassword,
-      aliasNotes: "",
-      type: "Premium",
-      status: "Inaktiv",
-      paymentStatus: "Nicht gezahlt",
-      createdAt: new Date(),
-      validUntil: new Date(new Date().getFullYear(), 11, 31),
-      owner: loggedInUser,
-      extensionHistory: [],
-      bougetList: "",
-      admin_fee: null,
-      extensionRequest: null,
-    });
-    setOpenCreateDialog(true);
-  }, [loggedInUser, setOpenCreateDialog]);
-
-  const handleOpenManualEntryDialog = useCallback(() => {
-    setManualEntry({
-      username: "",
-      password: "",
-      aliasNotes: "",
-      type: "Premium",
-      validUntil: new Date(new Date().getFullYear(), 11, 31),
-      owner: loggedInUser,
-      extensionHistory: [],
-      bougetList: "",
-      admin_fee: null,
-      extensionRequest: null,
-    });
-    setOpenManualDialog(true);
-  }, [loggedInUser, setOpenManualDialog]);
-
-  const createEntry = useCallback(async () => {
-    if (!newEntry.aliasNotes.trim()) {
-      showSnackbar("Bitte Spitzname eingeben.", "error");
-      return;
-    }
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase.from("entries").insert([newEntry]).select();
-      if (error) throw error;
-      setEntries((prev) => [data[0], ...prev]);
-      setOpenCreateDialog(false);
-      showSnackbar("Neuer Abonnent erfolgreich angelegt!");
-    } catch (error) {
-      handleError(error, showSnackbar);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [newEntry, setEntries, showSnackbar, setOpenCreateDialog]);
-
-  const handleAddManualEntry = useCallback(async () => {
-    if (!manualEntry.username || !manualEntry.password || !manualEntry.aliasNotes) {
-      showSnackbar("Bitte füllen Sie alle Felder aus.", "error");
-      return;
-    }
-    setIsLoading(true);
-    const validUntilDate = new Date(manualEntry.validUntil);
-    const newManualEntry = {
-      username: manualEntry.username,
-      password: manualEntry.password,
-      aliasNotes: manualEntry.aliasNotes,
-      type: manualEntry.type,
-      validUntil: validUntilDate,
-      owner: loggedInUser,
-      status: "Aktiv",
-      paymentStatus: "Gezahlt",
-      createdAt: new Date(),
-      note: "Dieser Abonnent besteht bereits",
-      extensionHistory: [],
-      bougetList: manualEntry.bougetList,
-      admin_fee: role === "Admin" ? manualEntry.admin_fee : null,
-      extensionRequest: null,
+      aliasNotes: nickname,
+      password,
+      package: pkg,
+      packageName: pkg === "premium" ? "Premium (€120)" : "Basic (€100)",
+      owner: createdBy,
+      createdAt: new Date().toISOString(),
+      validUntil: endDate.toISOString(),
+      status,
+      price: priceInfo.proratedPrice,
     };
+
     try {
-      const { data, error } = await supabase.from("entries").insert([newManualEntry]).select();
-      if (error) throw error;
-      setEntries((prev) => [data[0], ...prev]);
-      setOpenManualDialog(false);
-      showSnackbar("Bestehender Abonnent erfolgreich eingepflegt!");
+      if (editId) {
+        const { data, error } = await supabase
+          .from("entries")
+          .update(entryData)
+          .eq("id", editId)
+          .select()
+          .single();
+        if (error) throw error;
+        setEntries((prev) => prev.map((entry) => (entry.id === editId ? data : entry)));
+        showSnackbar("Eintrag erfolgreich aktualisiert!");
+      } else {
+        const { data, error } = await supabase
+          .from("entries")
+          .insert([entryData])
+          .select()
+          .single();
+        if (error) throw error;
+        setEntries((prev) => [...prev, data]);
+        showSnackbar("Eintrag erfolgreich erstellt!");
+      }
+      setOpenModal(false);
+      setEditId(null);
+      setFormData({ username: "", nickname: "", password: "", package: "premium", createdBy: loggedInUser, status: "active" });
     } catch (error) {
       handleError(error, showSnackbar);
-    } finally {
-      setIsLoading(false);
     }
-  }, [manualEntry, loggedInUser, role, setEntries, showSnackbar, setOpenManualDialog]);
+  }, [formData, editId, loggedInUser, setEntries, showSnackbar]);
+
+  // Eintrag löschen
+  const handleDelete = useCallback(
+    async (id) => {
+      if (window.confirm("Möchten Sie diesen Eintrag wirklich löschen?")) {
+        try {
+          const { error } = await supabase.from("entries").delete().eq("id", id);
+          if (error) throw error;
+          setEntries((prev) => prev.filter((entry) => entry.id !== id));
+          showSnackbar("Eintrag erfolgreich gelöscht!");
+        } catch (error) {
+          handleError(error, showSnackbar);
+        }
+      }
+    },
+    [setEntries, showSnackbar]
+  );
+
+  // Eintrag bearbeiten
+  const handleEdit = (entry) => {
+    setFormData({
+      username: entry.username,
+      nickname: entry.aliasNotes || "",
+      password: entry.password || "",
+      package: entry.package || "premium",
+      createdBy: entry.owner,
+      status: entry.status.toLowerCase(),
+    });
+    setEditId(entry.id);
+    setOpenModal(true);
+  };
+
+  // Einträge abrufen
+  useEffect(() => {
+    const fetchEntries = async () => {
+      try {
+        const { data, error } = await supabase.from("entries").select("*");
+        if (error) throw error;
+        setEntries(data);
+      } catch (error) {
+        handleError(error, showSnackbar);
+      }
+    };
+    fetchEntries();
+  }, [setEntries, showSnackbar]);
 
   return (
-    <Box sx={{ p: isMobile ? 1 : 3, bgcolor: "#f5f5f5", borderRadius: 2 }}>
-      <Typography
-        variant="h5"
-        gutterBottom
-        sx={{
-          fontWeight: "bold",
-          color: "#1976d2",
-          fontSize: isMobile ? "1.2rem" : "1.5rem",
-        }}
-      >
-        Abonnenten
-      </Typography>
-      {role !== "Admin" && (
-        <Card sx={{ mb: 3, p: isMobile ? 1 : 2, bgcolor: "#e3f2fd", boxShadow: 3, borderRadius: 2 }}>
-          <CardContent>
-            <Typography variant="body1" sx={{ fontSize: isMobile ? "0.9rem" : "1.1rem" }}>
-              {motivationMessage}
-            </Typography>
-            <Typography variant="body2" sx={{ mt: 1, color: "#555", fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
-              Gesamtgebühren: {calculateTotalFeesForOwner(loggedInUser).toLocaleString()} €
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-      <Box
-        sx={{
-          mb: 3,
-          display: "flex",
-          flexDirection: isMobile ? "column" : "row",
-          gap: isMobile ? 1 : 2,
-        }}
-      >
-        <TextField
-          label="🔍 Suche nach Benutzername oder Spitzname"
-          variant="outlined"
-          fullWidth
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          sx={{ bgcolor: "#fff", borderRadius: 1 }}
-          size={isMobile ? "small" : "medium"}
-        />
-        <Select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          displayEmpty
-          fullWidth
-          sx={{ bgcolor: "#fff", borderRadius: 1 }}
-          size={isMobile ? "small" : "medium"}
-        >
-          <MenuItem value="">Alle Status</MenuItem>
-          <MenuItem value="Aktiv">Aktiv</MenuItem>
-          <MenuItem value="Inaktiv">Inaktiv</MenuItem>
-        </Select>
-        <Select
-          value={paymentFilter}
-          onChange={(e) => setPaymentFilter(e.target.value)}
-          displayEmpty
-          fullWidth
-          sx={{ bgcolor: "#fff", borderRadius: 1 }}
-          size={isMobile ? "small" : "medium"}
-        >
-          <MenuItem value="">Alle Zahlungen</MenuItem>
-          <MenuItem value="Gezahlt">Gezahlt</MenuItem>
-          <MenuItem value="Nicht gezahlt">Nicht gezahlt</MenuItem>
-        </Select>
-        {role === "Admin" && (
-          <Select
-            value={ownerFilter}
-            onChange={(e) => setOwnerFilter(e.target.value)}
-            displayEmpty
-            fullWidth
-            sx={{ bgcolor: "#fff", borderRadius: 1 }}
-            size={isMobile ? "small" : "medium"}
-          >
-            <MenuItem value="">Alle Ersteller</MenuItem>
-            {owners.map((owner) => (
-              <MenuItem key={owner} value={owner}>
-                {owner}
-              </MenuItem>
-            ))}
-          </Select>
-        )}
-      </Box>
-      <Box
-        sx={{
-          mb: 3,
-          display: "flex",
-          gap: isMobile ? 1 : 2,
-          flexWrap: "wrap",
-          flexDirection: isMobile ? "column" : "row",
-        }}
-      >
-        <Button
-          variant="contained"
-          color="success"
-          startIcon={<AddIcon />}
-          onClick={handleOpenCreateEntryDialog}
-          disabled={isLoading}
-          sx={{
-            borderRadius: 2,
-            px: 3,
-            py: isMobile ? 1.5 : 1,
-            minHeight: isMobile ? 48 : 36,
-            fontSize: isMobile ? "0.9rem" : "1rem",
-          }}
-          aria-label="Neuen Abonnenten erstellen"
-        >
-          Neuer Abonnent
-        </Button>
-        {role === "Admin" && (
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<AddIcon />}
-            onClick={handleOpenManualEntryDialog}
-            disabled={isLoading}
-            sx={{
-              borderRadius: 2,
-              px: 3,
-              py: isMobile ? 1.5 : 1,
-              minHeight: isMobile ? 48 : 36,
-              fontSize: isMobile ? "0.9rem" : "1rem",
+    <div className="bg-gray-50 p-6">
+      {/* Action Bar */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6 flex flex-wrap items-center justify-between">
+        <div className="flex space-x-2 mb-2 md:mb-0">
+          <button
+            onClick={() => {
+              setFormData({ username: "", nickname: "", password: "", package: "premium", createdBy: loggedInUser, status: "active" });
+              setEditId(null);
+              setOpenModal(true);
             }}
-            aria-label="Bestehenden Abonnenten hinzufügen"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center"
           >
-            Bestehender Abonnent
-          </Button>
-        )}
-      </Box>
-      {isLoading && (
-        <Typography sx={{ textAlign: "center", my: 2, fontSize: isMobile ? "0.9rem" : "1rem" }}>
-          🔄 Lade...
-        </Typography>
+            <i className="fas fa-plus mr-2"></i> Neuer Eintrag
+          </button>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="relative">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="appearance-none bg-white border border-gray-300 rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Alle Status</option>
+              <option value="active">Aktiv</option>
+              <option value="pending">Ausstehend</option>
+              <option value="expired">Abgelaufen</option>
+            </select>
+            <i className="fas fa-chevron-down absolute right-3 top-3 text-gray-400 pointer-events-none"></i>
+          </div>
+          <div className="relative">
+            <select
+              value={packageFilter}
+              onChange={(e) => setPackageFilter(e.target.value)}
+              className="appearance-none bg-white border border-gray-300 rounded-lg pl-3 pr-8 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">Alle Pakete</option>
+              <option value="premium">Premium</option>
+              <option value="basic">Basic</option>
+            </select>
+            <i className="fas fa-chevron-down absolute right-3 top-3 text-gray-400 pointer-events-none"></i>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabelle */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Benutzername</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Spitzname</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Paket</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ersteller</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Gültigkeit</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredEntries.map((entry) => {
+                const daysRemaining = Math.ceil((new Date(entry.validUntil) - new Date()) / (1000 * 60 * 60 * 24));
+                return (
+                  <tr key={entry.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => alert(`Details: ${JSON.stringify(entry, null, 2)}`)}>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                          <span className="text-indigo-600 font-medium">{entry.username.charAt(0).toUpperCase()}</span>
+                        </div>
+                        <div className="ml-4">
+                          <div className="text-sm font-medium text-gray-900">{entry.username}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{entry.aliasNotes || "-"}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div
+                        className={`${
+                          entry.package === "premium" ? "package-premium bg-yellow-50 text-yellow-800" : "package-basic bg-green-50 text-green-800"
+                        } px-3 py-1 rounded-full text-sm font-medium`}
+                      >
+                        {entry.packageName || (entry.package === "premium" ? "Premium (€120)" : "Basic (€100)")}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <div className="flex items-center">
+                        <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs mr-2">
+                          {entry.owner.charAt(0).toUpperCase()}
+                        </div>
+                        {entry.owner}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {formatDate(entry.createdAt)} - {formatDate(entry.validUntil)}
+                      </div>
+                      <div className="text-sm text-gray-500">Noch {daysRemaining > 0 ? daysRemaining : 0} Tage</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`${
+                          entry.status.toLowerCase() === "active"
+                            ? "status-active"
+                            : entry.status.toLowerCase() === "pending"
+                            ? "status-pending"
+                            : "status-expired"
+                        } px-2 py-1 text-xs font-medium rounded-full`}
+                      >
+                        {entry.status === "active" ? "Aktiv" : entry.status === "pending" ? "Ausstehend" : "Abgelaufen"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex space-x-2">
+                        <button onClick={() => handleEdit(entry)} className="text-yellow-600 hover:text-yellow-900">
+                          <i className="fas fa-edit"></i>
+                        </button>
+                        {role === "Admin" && (
+                          <button onClick={() => handleDelete(entry.id)} className="text-red-600 hover:text-red-900">
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal */}
+      {openModal && (
+        <div className="modal fixed z-50 inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+          <div className="modal-content bg-white p-6 rounded-lg w-full max-w-md">
+            <span onClick={() => setOpenModal(false)} className="close float-right text-2xl font-bold text-gray-500 cursor-pointer">
+              &times;
+            </span>
+            <h2 className="text-xl font-bold mb-4">{editId ? "Eintrag bearbeiten" : "Neuer Eintrag"}</h2>
+            <form onSubmit={handleSubmit}>
+              <div className="mb-4">
+                <label htmlFor="username" className="block text-sm font-medium text-gray-700">
+                  Benutzername *
+                </label>
+                <input
+                  type="text"
+                  id="username"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="nickname" className="block text-sm font-medium text-gray-700">
+                  Spitzname
+                </label>
+                <input
+                  type="text"
+                  id="nickname"
+                  value={formData.nickname}
+                  onChange={(e) => setFormData({ ...formData, nickname: e.target.value })}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="mb-4">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+                  Passwort *
+                </label>
+                <input
+                  type="password"
+                  id="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label htmlFor="package" className="block text-sm font-medium text-gray-700">
+                    Paket *
+                  </label>
+                  <select
+                    id="package"
+                    value={formData.package}
+                    onChange={(e) => setFormData({ ...formData, package: e.target.value })}
+                    required
+                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="premium">Premium (€120/Jahr)</option>
+                    <option value="basic">Basic (€100/Jahr)</option>
+                  </select>
+                </div>
+                {role === "Admin" && (
+                  <div>
+                    <label htmlFor="createdBy" className="block text-sm font-medium text-gray-700">
+                      Erstellt von *
+                    </label>
+                    <input
+                      type="text"
+                      id="createdBy"
+                      value={formData.createdBy}
+                      onChange={(e) => setFormData({ ...formData, createdBy: e.target.value })}
+                      required
+                      className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="mb-4">
+                <label htmlFor="status" className="block text-sm font-medium text-gray-700">
+                  Status *
+                </label>
+                <select
+                  id="status"
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  required
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="active">Aktiv</option>
+                  <option value="pending">Ausstehend</option>
+                  <option value="expired">Abgelaufen</option>
+                </select>
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg mb-4">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Preisberechnung</h3>
+                <p className="text-sm text-gray-600">
+                  Preis bis 31.12.{new Date().getFullYear()}: €{calculatePrice(formData.package).proratedPrice} (
+                  {calculatePrice(formData.package).daysRemaining} Tage)
+                </p>
+              </div>
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setOpenModal(false)}
+                  className="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                >
+                  Speichern
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
-      {filteredEntries.length === 0 ? (
-        <Card sx={{ p: isMobile ? 2 : 3, textAlign: "center", boxShadow: 3, borderRadius: 2 }}>
-          <Typography variant="h6" color="textSecondary" sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
-            Keine Einträge gefunden.
-          </Typography>
-        </Card>
-      ) : (
-        <Grid container spacing={isMobile ? 1 : 3}>
-          {filteredEntries.map((entry) => (
-            <Grid item xs={12} sm={6} md={4} key={entry.id}>
-              <Card
-                sx={{
-                  borderRadius: 3,
-                  boxShadow: 4,
-                  bgcolor: role === "Admin" ? OWNER_COLORS[entry.owner] || "#ffffff" : "#ffffff",
-                  transition: "transform 0.2s",
-                  "&:hover": {
-                    transform: "translateY(-4px)",
-                    boxShadow: 6,
-                  },
-                }}
-              >
-                <CardContent sx={{ p: isMobile ? 2 : 3 }}>
-                  <Typography variant="h6" sx={{ fontWeight: "bold", mb: 1, fontSize: isMobile ? "1rem" : "1.25rem" }}>
-                    {entry.aliasNotes}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
-                    Benutzername: {entry.username}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary" sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}>
-                    Gültig bis: {formatDate(entry.validUntil)}
-                  </Typography>
-                  <EntryAccordion
-                    entry={entry}
-                    role={role}
-                    loggedInUser={loggedInUser}
-                    setEntries={setEntries}
-                  />
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
-      <Dialog
-        open={openCreateDialog}
-        onClose={() => setOpenCreateDialog(false)}
-        fullWidth
-        maxWidth="sm"
-        fullScreen={isMobile}
-      >
-        <DialogTitle sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
-          Neuen Abonnenten anlegen
-        </DialogTitle>
-        <DialogContent>
-          <TextField
-            label="Benutzername"
-            fullWidth
-            margin="normal"
-            value={newEntry.username}
-            disabled
-            sx={{ bgcolor: "#f0f0f0" }}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Passwort"
-            fullWidth
-            margin="normal"
-            type="text"
-            value={newEntry.password}
-            disabled
-            sx={{ bgcolor: "#f0f0f0" }}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Spitzname, Notizen etc."
-            fullWidth
-            margin="normal"
-            value={newEntry.aliasNotes}
-            onChange={(e) => setNewEntry({ ...newEntry, aliasNotes: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Bouget-Liste (z.B. GER, CH, USA, XXX usw... oder Alles)"
-            fullWidth
-            margin="normal"
-            value={newEntry.bougetList || ""}
-            onChange={(e) => setNewEntry({ ...newEntry, bougetList: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <Select
-            fullWidth
-            margin="normal"
-            value={newEntry.type}
-            onChange={(e) => setNewEntry({ ...newEntry, type: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          >
-            <MenuItem value="Premium">Premium</MenuItem>
-            <MenuItem value="Basic">Basic</MenuItem>
-          </Select>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setOpenCreateDialog(false)}
-            color="secondary"
-            disabled={isLoading}
-            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
-          >
-            Abbrechen
-          </Button>
-          <Button
-            onClick={createEntry}
-            color="primary"
-            disabled={isLoading}
-            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
-          >
-            {isLoading ? "Speichere..." : "Erstellen"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Dialog
-        open={openManualDialog}
-        onClose={() => setOpenManualDialog(false)}
-        fullWidth
-        maxWidth="sm"
-        fullScreen={isMobile}
-      >
-        <DialogTitle sx={{ fontSize: isMobile ? "1rem" : "1.25rem" }}>
-          Bestehenden Abonnenten einpflegen
-        </DialogTitle>
-        <DialogContent>
-          <TextField
-            label="Benutzername"
-            fullWidth
-            margin="normal"
-            value={manualEntry.username}
-            onChange={(e) => setManualEntry({ ...manualEntry, username: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Passwort"
-            fullWidth
-            margin="normal"
-            type="text"
-            value={manualEntry.password}
-            onChange={(e) => setManualEntry({ ...manualEntry, password: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Spitzname, Notizen etc."
-            fullWidth
-            margin="normal"
-            value={manualEntry.aliasNotes}
-            onChange={(e) => setManualEntry({ ...manualEntry, aliasNotes: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <TextField
-            label="Bouget-Liste (z.B. GER, CH, USA, XXX usw... oder Alles)"
-            fullWidth
-            margin="normal"
-            value={manualEntry.bougetList || ""}
-            onChange={(e) => setManualEntry({ ...manualEntry, bougetList: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          <Select
-            fullWidth
-            margin="normal"
-            value={manualEntry.type}
-            onChange={(e) => setManualEntry({ ...manualEntry, type: e.target.value })}
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          >
-            <MenuItem value="Premium">Premium</MenuItem>
-            <MenuItem value="Basic">Basic</MenuItem>
-          </Select>
-          <TextField
-            label="Gültig bis"
-            fullWidth
-            margin="normal"
-            type="date"
-            value={
-              manualEntry.validUntil
-                ? new Date(manualEntry.validUntil).toISOString().split("T")[0]
-                : ""
-            }
-            onChange={(e) =>
-              setManualEntry({ ...manualEntry, validUntil: new Date(e.target.value) })
-            }
-            disabled={isLoading}
-            size={isMobile ? "small" : "medium"}
-          />
-          {role === "Admin" && (
-            <TextField
-              label="Admin-Gebühr (€)"
-              fullWidth
-              margin="normal"
-              value={manualEntry.admin_fee || ""}
-              onChange={(e) => {
-                const value = e.target.value.replace(/[^0-9]/g, "");
-                const numValue = value ? parseInt(value) : null;
-                if (numValue > 999) return;
-                setManualEntry({ ...manualEntry, admin_fee: numValue });
-              }}
-              inputProps={{ inputMode: "numeric", pattern: "[0-9]*" }}
-              disabled={isLoading}
-              size={isMobile ? "small" : "medium"}
-            />
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setOpenManualDialog(false)}
-            color="secondary"
-            disabled={isLoading}
-            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
-          >
-            Abbrechen
-          </Button>
-          <Button
-            onClick={handleAddManualEntry}
-            color="primary"
-            disabled={isLoading}
-            sx={{ fontSize: isMobile ? "0.8rem" : "0.875rem" }}
-          >
-            {isLoading ? "Speichere..." : "Hinzufügen"}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+    </div>
   );
 };
 
