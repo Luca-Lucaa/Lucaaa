@@ -1,25 +1,26 @@
 import React, { useState } from "react";
 import { TextField, Button, Box } from "@mui/material";
 import { supabase } from "./supabaseClient";
+import { handleError } from "./utils";
 
 const MessageForm = ({ loggedInUser, receiver }) => {
   const [message, setMessage] = useState("");
+  const [error, setError] = useState(null);
 
   const handleSendMessage = async () => {
-    if (!message.trim()) return;
-
+    if (!message.trim()) {
+      setError("Nachricht darf nicht leer sein.");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("messages")
         .insert([{ sender: loggedInUser, receiver, message }]);
-
-      if (error) {
-        console.error("Fehler beim Senden der Nachricht:", error);
-      } else {
-        setMessage("");
-      }
+      if (error) throw error;
+      setMessage("");
+      setError(null);
     } catch (error) {
-      console.error("Fehler beim Senden der Nachricht:", error);
+      handleError(error);
     }
   };
 
@@ -34,6 +35,8 @@ const MessageForm = ({ loggedInUser, receiver }) => {
         multiline
         rows={4}
         margin="normal"
+        error={!!error}
+        helperText={error}
       />
       <Button variant="contained" color="primary" onClick={handleSendMessage}>
         Senden
